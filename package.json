@@ -1,0 +1,16 @@
+{
+  "name": "ecomaintain",
+  "version": "1.0.0",
+  "description": "EcoMaintain - Sistema de Gestão de Manutenção Florestal",
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "echo 'Static build'"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^0.9.0",
+    "bcryptjs": "^2.4.3"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
