@@ -63,9 +63,12 @@ async function initDB() {
       assinatura_manutentor TEXT,
       assinatura_operador TEXT,
       foto_evidencia TEXT,
+      fotos_evidencia JSONB DEFAULT '[]',
       data_confirmacao TIMESTAMP,
       data_pendencia TIMESTAMP,
-      data_liberacao TIMESTAMP
+      data_liberacao TIMESTAMP,
+      laudo_gerado BOOLEAN DEFAULT FALSE,
+      laudo_data TIMESTAMP
     )
   `;
 
@@ -103,15 +106,126 @@ async function initDB() {
     )
   `;
 
+  // ============================================
+  // TABELAS - CHECKLIST DINÂMICO
+  // ============================================
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS checklist_itens (
+      id TEXT PRIMARY KEY,
+      agenda_id TEXT NOT NULL,
+      descricao TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pendente',
+      observacao TEXT,
+      ordem INTEGER DEFAULT 0,
+      respondido_por TEXT,
+      criado_por TEXT,
+      data_criacao TIMESTAMP DEFAULT NOW(),
+      data_atualizacao TIMESTAMP DEFAULT NOW()
+    )
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS laudos (
+      id TEXT PRIMARY KEY,
+      agenda_id TEXT NOT NULL,
+      os_id TEXT,
+      maquina_id TEXT,
+      maquina_nome TEXT,
+      manutentor_id TEXT,
+      manutentor_nome TEXT,
+      tipo_manutencao TEXT,
+      data_execucao TIMESTAMP,
+      itens_checklist JSONB NOT NULL DEFAULT '[]',
+      total_itens INTEGER DEFAULT 0,
+      itens_ok INTEGER DEFAULT 0,
+      itens_nao_ok INTEGER DEFAULT 0,
+      observacoes_gerais TEXT,
+      status_laudo TEXT DEFAULT 'pendente_aprovacao',
+      aprovado_por TEXT,
+      data_aprovacao TIMESTAMP,
+      data_geracao TIMESTAMP DEFAULT NOW()
+    )
+  `;
+
+  // ============================================
+  // TABELAS - MANUAIS NA NUVEM
+  // ============================================
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS manuais (
+      id TEXT PRIMARY KEY,
+      titulo TEXT NOT NULL,
+      maquina_id TEXT,
+      descricao TEXT,
+      nome_arquivo TEXT NOT NULL,
+      tipo_arquivo TEXT,
+      tamanho_arquivo BIGINT DEFAULT 0,
+      conteudo_base64 TEXT,
+      cadastrado_por TEXT,
+      data_criacao TIMESTAMP DEFAULT NOW(),
+      data_atualizacao TIMESTAMP DEFAULT NOW(),
+      ativo BOOLEAN DEFAULT TRUE
+    )
+  `;
+
+  // ============================================
+  // TABELAS - RELATÓRIO DE FECHAMENTO
+  // ============================================
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS relatorios_fechamento (
+      id TEXT PRIMARY KEY,
+      os_id TEXT NOT NULL,
+      maquina_id TEXT,
+      maquina_nome TEXT,
+      manutentor_id TEXT,
+      manutentor_nome TEXT,
+      status_final TEXT,
+      descricao_execucao TEXT,
+      assinatura_manutentor TEXT,
+      fotos_evidencia JSONB DEFAULT '[]',
+      apontamentos JSONB DEFAULT '[]',
+      pecas_utilizadas JSONB DEFAULT '[]',
+      laudo_checklist_id TEXT,
+      data_inicio TIMESTAMP,
+      data_fechamento TIMESTAMP,
+      data_geracao TIMESTAMP DEFAULT NOW(),
+      visualizado_pcm BOOLEAN DEFAULT FALSE,
+      data_visualizacao_pcm TIMESTAMP
+    )
+  `;
+
+  // Adicionar colunas novas em tabelas existentes (se não existirem)
+  try {
+    await sql`ALTER TABLE ordens_servico ADD COLUMN IF NOT EXISTS fotos_evidencia JSONB DEFAULT '[]'`;
+  } catch(e) { /* coluna já existe */ }
+
+  try {
+    await sql`ALTER TABLE ordens_servico ADD COLUMN IF NOT EXISTS laudo_gerado BOOLEAN DEFAULT FALSE`;
+  } catch(e) { /* coluna já existe */ }
+
+  try {
+    await sql`ALTER TABLE ordens_servico ADD COLUMN IF NOT EXISTS laudo_data TIMESTAMP`;
+  } catch(e) { /* coluna já existe */ }
+
+  try {
+    await sql`ALTER TABLE checklist_itens ADD COLUMN IF NOT EXISTS respondido_por TEXT`;
+  } catch(e) { /* coluna já existe */ }
+
   // Inserir usuário PCM padrão se não existir
-  const pcmExistente = await sql`SELECT id FROM usuarios WHERE email = 'pcm@admin.com'`;
-  if (pcmExistente.length === 0) {
-    const bcrypt = require('bcryptjs');
-    const senhaHash = await bcrypt.hash('123456', 10);
-    await sql`
-      INSERT INTO usuarios (id, nome, email, senha, role)
-      VALUES ('PCM_ADMIN', 'Administrador PCM', 'pcm@admin.com', ${senhaHash}, 'pcm')
-    `;
+  try {
+    const pcmExistente = await sql`SELECT id FROM usuarios WHERE email = 'pcm@admin.com'`;
+    if (pcmExistente.length === 0) {
+      const bcrypt = require('bcryptjs');
+      const senhaHash = await bcrypt.hash('123456', 10);
+      await sql`
+        INSERT INTO usuarios (id, nome, email, senha, role)
+        VALUES ('PCM_ADMIN', 'Administrador PCM', 'pcm@admin.com', ${senhaHash}, 'pcm')
+      `;
+    }
+  } catch(e) {
+    console.warn('Aviso ao criar usuário PCM padrão:', e.message);
   }
 }
 

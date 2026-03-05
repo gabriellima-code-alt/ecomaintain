@@ -83,9 +83,9 @@ module.exports = async (req, res) => {
       const id = 'OS_' + Date.now();
 
       await sql`
-        INSERT INTO ordens_servico (id, maquina_id, descricao, status, manutentor, id_manutentor, data_criacao)
+        INSERT INTO ordens_servico (id, maquina_id, descricao, status, manutentor, id_manutentor, data_criacao, fotos_evidencia)
         VALUES (${id}, ${maquinaId}, ${descricao}, 'ativa', ${manutentor || ''}, ${idManutentor || null},
-                ${dataCriacao ? new Date(dataCriacao) : new Date()})
+                ${dataCriacao ? new Date(dataCriacao) : new Date()}, '[]')
       `;
 
       return res.status(201).json({
@@ -98,7 +98,8 @@ module.exports = async (req, res) => {
           manutentor,
           dataCriacao: dataCriacao || new Date().toISOString(),
           apontamentos: [],
-          pecas: []
+          pecas: [],
+          fotosEvidencia: []
         }
       });
     }
@@ -108,8 +109,10 @@ module.exports = async (req, res) => {
       const {
         id, status, descricaoFinal, dataFechamento,
         assinaturaManutentor, assinaturaOperador,
-        fotoEvidencia, dataConfirmacao,
+        fotoEvidencia, fotosEvidencia,
+        dataConfirmacao,
         dataPendencia, dataLiberacao,
+        laudoGerado, laudoData,
         // Para adicionar apontamento
         apontamento,
         // Para adicionar peças
@@ -147,9 +150,6 @@ module.exports = async (req, res) => {
       }
 
       // Atualizar campos da OS
-      const updates = [];
-      const values = [];
-
       if (status !== undefined) {
         await sql`UPDATE ordens_servico SET status = ${status} WHERE id = ${id}`;
       }
@@ -168,6 +168,9 @@ module.exports = async (req, res) => {
       if (fotoEvidencia !== undefined) {
         await sql`UPDATE ordens_servico SET foto_evidencia = ${fotoEvidencia} WHERE id = ${id}`;
       }
+      if (fotosEvidencia !== undefined) {
+        await sql`UPDATE ordens_servico SET fotos_evidencia = ${JSON.stringify(fotosEvidencia)} WHERE id = ${id}`;
+      }
       if (dataConfirmacao !== undefined) {
         await sql`UPDATE ordens_servico SET data_confirmacao = ${new Date(dataConfirmacao)} WHERE id = ${id}`;
       }
@@ -176,6 +179,12 @@ module.exports = async (req, res) => {
       }
       if (dataLiberacao !== undefined) {
         await sql`UPDATE ordens_servico SET data_liberacao = ${new Date(dataLiberacao)} WHERE id = ${id}`;
+      }
+      if (laudoGerado !== undefined) {
+        await sql`UPDATE ordens_servico SET laudo_gerado = ${laudoGerado} WHERE id = ${id}`;
+      }
+      if (laudoData !== undefined) {
+        await sql`UPDATE ordens_servico SET laudo_data = ${new Date(laudoData)} WHERE id = ${id}`;
       }
 
       return res.status(200).json({ sucesso: true });
@@ -204,9 +213,12 @@ function formatarOS(os, apontamentos, pecas) {
     assinaturaManutentor: os.assinatura_manutentor,
     assinaturaOperador: os.assinatura_operador,
     fotoEvidencia: os.foto_evidencia,
+    fotosEvidencia: os.fotos_evidencia || [],
     dataConfirmacao: os.data_confirmacao ? os.data_confirmacao.toISOString() : null,
     dataPendencia: os.data_pendencia ? os.data_pendencia.toISOString() : null,
     dataLiberacao: os.data_liberacao ? os.data_liberacao.toISOString() : null,
+    laudoGerado: os.laudo_gerado || false,
+    laudoData: os.laudo_data ? os.laudo_data.toISOString() : null,
     apontamentos: apontamentos.map(a => ({
       id: a.id,
       tipo: a.tipo,
