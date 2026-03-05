@@ -168,6 +168,14 @@ module.exports = async (req, res) => {
       if (fotoEvidencia !== undefined) {
         await sql`UPDATE ordens_servico SET foto_evidencia = ${fotoEvidencia} WHERE id = ${id}`;
       }
+      // Suporte a múltiplas fotos
+      if (req.body.fotosEvidencia !== undefined) {
+        await sql`UPDATE ordens_servico SET fotos_evidencia = ${JSON.stringify(req.body.fotosEvidencia)} WHERE id = ${id}`;
+      }
+      // Suporte a relatório de fechamento
+      if (req.body.relatorioFechamento !== undefined) {
+        await sql`UPDATE ordens_servico SET relatorio_fechamento = ${JSON.stringify(req.body.relatorioFechamento)} WHERE id = ${id}`;
+      }
       if (dataConfirmacao !== undefined) {
         await sql`UPDATE ordens_servico SET data_confirmacao = ${new Date(dataConfirmacao)} WHERE id = ${id}`;
       }
@@ -204,6 +212,8 @@ function formatarOS(os, apontamentos, pecas) {
     assinaturaManutentor: os.assinatura_manutentor,
     assinaturaOperador: os.assinatura_operador,
     fotoEvidencia: os.foto_evidencia,
+    fotosEvidencia: os.fotos_evidencia || [],
+    relatorioFechamento: os.relatorio_fechamento || null,
     dataConfirmacao: os.data_confirmacao ? os.data_confirmacao.toISOString() : null,
     dataPendencia: os.data_pendencia ? os.data_pendencia.toISOString() : null,
     dataLiberacao: os.data_liberacao ? os.data_liberacao.toISOString() : null,

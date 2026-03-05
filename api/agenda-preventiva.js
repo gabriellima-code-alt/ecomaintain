@@ -71,7 +71,7 @@ module.exports = async (req, res) => {
 
     // PUT - Atualizar status do agendamento (concluir checklist)
     if (req.method === 'PUT') {
-      const { id, status } = req.body;
+      const { id, status, checklist_itens, checklist_observacoes, laudo_gerado } = req.body;
 
       if (!id || !status) {
         return res.status(400).json({ erro: 'ID e status são obrigatórios.' });
@@ -80,7 +80,10 @@ module.exports = async (req, res) => {
       if (status === 'concluido') {
         await sql`
           UPDATE agenda_preventiva
-          SET status = 'concluido', data_conclusao = NOW()
+          SET status = 'concluido', data_conclusao = NOW(),
+              checklist_itens = ${JSON.stringify(checklist_itens || [])},
+              checklist_observacoes = ${checklist_observacoes || null},
+              laudo_gerado = ${laudo_gerado || false}
           WHERE id = ${id}
         `;
       } else {

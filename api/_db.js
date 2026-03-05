@@ -99,19 +99,41 @@ async function initDB() {
       tipo_manutencao TEXT,
       status TEXT DEFAULT 'pendente',
       data_conclusao TIMESTAMP,
-      data_cadastro TIMESTAMP DEFAULT NOW()
+      data_cadastro TIMESTAMP DEFAULT NOW(),
+      checklist_itens JSONB DEFAULT '[]',
+      checklist_observacoes TEXT,
+      laudo_gerado BOOLEAN DEFAULT FALSE
     )
   `;
 
+  // Adicionar coluna de manuais se não existir
+  try {
+    await sql`ALTER TABLE maquinas ADD COLUMN IF NOT EXISTS manual_pdf BYTEA`;
+  } catch(e) { /* coluna já existe */ }
+
+  // Adicionar coluna de fotos múltiplas se não existir
+  try {
+    await sql`ALTER TABLE ordens_servico ADD COLUMN IF NOT EXISTS fotos_evidencia JSONB DEFAULT '[]'`;
+  } catch(e) { /* coluna já existe */ }
+
+  // Adicionar coluna de relatório de fechamento se não existir
+  try {
+    await sql`ALTER TABLE ordens_servico ADD COLUMN IF NOT EXISTS relatorio_fechamento JSONB`;
+  } catch(e) { /* coluna já existe */ }
+
   // Inserir usuário PCM padrão se não existir
-  const pcmExistente = await sql`SELECT id FROM usuarios WHERE email = 'pcm@admin.com'`;
-  if (pcmExistente.length === 0) {
-    const bcrypt = require('bcryptjs');
-    const senhaHash = await bcrypt.hash('123456', 10);
-    await sql`
-      INSERT INTO usuarios (id, nome, email, senha, role)
-      VALUES ('PCM_ADMIN', 'Administrador PCM', 'pcm@admin.com', ${senhaHash}, 'pcm')
-    `;
+  try {
+    const pcmExistente = await sql`SELECT id FROM usuarios WHERE email = 'pcm@admin.com'`;
+    if (pcmExistente.length === 0) {
+      const bcrypt = require('bcryptjs');
+      const senhaHash = await bcrypt.hash('123456', 10);
+      await sql`
+        INSERT INTO usuarios (id, nome, email, senha, role)
+        VALUES ('PCM_ADMIN', 'Administrador PCM', 'pcm@admin.com', ${senhaHash}, 'pcm')
+      `;
+    }
+  } catch(e) {
+    console.warn('Aviso ao criar usuário PCM padrão:', e.message);
   }
 }
 
