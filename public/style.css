@@ -1260,3 +1260,290 @@ canvas {
         font-size: 13px;
     }
 }
+
+/* ============================================
+   CHECKLIST DINÂMICO
+   ============================================ */
+
+.checklist-item {
+    transition: all 0.3s ease;
+}
+
+.checklist-item:hover {
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(-10px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* ============================================
+   UPLOAD DE FOTOS E EVIDÊNCIAS
+   ============================================ */
+
+.fotos-preview {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 10px;
+    min-height: 50px;
+    padding: 10px;
+    background: #f9f9f9;
+    border-radius: 6px;
+    border: 1px dashed #e0e0e0;
+}
+
+.foto-thumb {
+    position: relative;
+    display: inline-block;
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.foto-thumb img {
+    width: 100px;
+    height: 75px;
+    object-fit: cover;
+    display: block;
+}
+
+.foto-thumb .remove-btn {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    background: rgba(220,53,69,0.9);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    line-height: 1;
+}
+
+/* ============================================
+   ASSINATURA DIGITAL
+   ============================================ */
+
+.signature-container {
+    border: 2px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+    background: white;
+}
+
+.signature-container canvas {
+    width: 100%;
+    height: 150px;
+    cursor: crosshair;
+    display: block;
+}
+
+.signature-actions {
+    display: flex;
+    gap: 10px;
+    padding: 10px;
+    background: #f5f5f5;
+    border-top: 1px solid var(--border-color);
+}
+
+/* ============================================
+   LAUDOS E RELATÓRIOS
+   ============================================ */
+
+.laudo-card {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 15px;
+    background: white;
+    transition: all 0.3s ease;
+}
+
+.laudo-card:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    border-color: var(--primary-green);
+}
+
+.laudo-card.pendente {
+    border-left: 4px solid #ffc107;
+}
+
+.laudo-card.aprovado {
+    border-left: 4px solid #28a745;
+}
+
+.laudo-card.reprovado {
+    border-left: 4px solid #dc3545;
+}
+
+.laudo-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.laudo-status.pendente_aprovacao {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.laudo-status.aprovado {
+    background: #d4edda;
+    color: #155724;
+}
+
+.laudo-status.reprovado {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+/* ============================================
+   MANUAIS NA NUVEM
+   ============================================ */
+
+.manual-card {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 20px;
+    background: white;
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.manual-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+    border-color: var(--primary-green);
+}
+
+.manual-icon {
+    font-size: 2.5em;
+    margin-bottom: 10px;
+}
+
+.upload-area {
+    border: 2px dashed var(--primary-green);
+    border-radius: 8px;
+    padding: 30px;
+    text-align: center;
+    background: #f9fbe7;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.upload-area:hover {
+    background: #f1f8e9;
+    border-color: var(--light-green);
+}
+
+.upload-area.dragover {
+    background: #e8f5e9;
+    border-color: var(--light-green);
+    transform: scale(1.01);
+}
+
+/* ============================================
+   RELATÓRIO DE FECHAMENTO
+   ============================================ */
+
+.relatorio-card {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 15px;
+    background: white;
+}
+
+.relatorio-card.finalizado {
+    border-left: 4px solid #28a745;
+}
+
+.relatorio-card.pendente {
+    border-left: 4px solid #ffc107;
+}
+
+.foto-evidencia-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.foto-evidencia-grid img {
+    width: 100%;
+    height: 90px;
+    object-fit: cover;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.foto-evidencia-grid img:hover {
+    transform: scale(1.05);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+
+/* ============================================
+   BADGE EXTRA
+   ============================================ */
+
+.badge-secondary {
+    background-color: #6c757d;
+    color: white;
+}
+
+.badge-primary {
+    background-color: var(--primary-green);
+    color: white;
+}
+
+/* ============================================
+   NOTIFICAÇÕES FLUTUANTES
+   ============================================ */
+
+#notificacoes {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 9999;
+    max-width: 350px;
+    pointer-events: none;
+}
+
+#notificacoes > div {
+    pointer-events: all;
+    animation: slideIn 0.3s ease;
+}
+
+/* ============================================
+   INDICADOR DE NOVO RECURSO
+   ============================================ */
+
+.nav-link .badge-new {
+    background: #dc3545;
+    color: white;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    margin-left: auto;
+    animation: pulse 2s infinite;
+}
