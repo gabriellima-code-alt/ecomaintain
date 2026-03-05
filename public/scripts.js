@@ -294,11 +294,17 @@ const DB = {
         return data.agendamento;
     },
 
-    async atualizarAgendamento(id, status) {
+    async atualizarAgendamento(id, status, checklistData = null) {
+        const body = { id, status };
+        if (checklistData) {
+            body.checklist_itens = checklistData.itens || [];
+            body.checklist_observacoes = checklistData.observacoes || null;
+            body.laudo_gerado = checklistData.laudoGerado || false;
+        }
         const resp = await fetch(`${API_BASE}/agenda-preventiva`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id, status })
+            body: JSON.stringify(body)
         });
         if (!resp.ok) {
             const data = await resp.json();
@@ -716,9 +722,10 @@ const UI = {
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label">Anexar Evidências (Foto Final) <span style="color: red;">*</span></label>
-                    <input type="file" id="fotoEvidencia" class="form-control" accept="image/*">
-                    <small style="color: #757575;">Foto obrigatória para finalizar</small>
+                    <label class="form-label">Anexar Evidências (Fotos) <span style="color: red;">*</span></label>
+                    <input type="file" id="fotoEvidencia" class="form-control" accept="image/*" multiple>
+                    <small style="color: #757575;">Selecione uma ou mais fotos (obrigatório)</small>
+                    <div id="previewFotos" style="margin-top: 10px; display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px;"></div>
                 </div>
 
                 <div class="form-group">
@@ -1293,6 +1300,12 @@ Tempo Total: ${horas}h ${minutos}m
                     <p class="card-text">Todas as manutenções realizadas por máquina</p>
                     <button class="btn btn-primary btn-block" onclick="RELATORIOS.gerarHistoricoMaquinas()">Gerar Relatório</button>
                 </div>
+
+                <div class="card">
+                    <h3 class="card-title">📸 Fechamento de O.S.</h3>
+                    <p class="card-text">Relatórios com evidências fotográficas e assinaturas</p>
+                    <button class="btn btn-primary btn-block" onclick="RELATORIOS.listarRelatoriosFechamento()">Visualizar Relatórios</button>
+                </div>
             </div>
         `;
     }
@@ -1541,29 +1554,52 @@ const FECHAMENTO = {
         const descricao = document.getElementById('descricaoServico').value;
         const data = document.getElementById('dataConclusao').value;
         const hora = document.getElementById('horaConclusao').value;
-        const fotoEvidencia = document.getElementById('fotoEvidencia').files[0];
+        const fotosInput = document.getElementById('fotoEvidencia');
         const assinatura = document.getElementById('signatureCanvas').toDataURL();
 
         if (!osId) { NOTIFICACOES.erro('Selecione uma O.S.!'); return; }
         if (!status) { NOTIFICACOES.erro('Selecione o status final!'); return; }
         if (!descricao || descricao.length < 10) { NOTIFICACOES.erro('Descrição deve ter no mínimo 10 caracteres!'); return; }
-        if (!fotoEvidencia) { NOTIFICACOES.erro('Anexe uma foto de evidência!'); return; }
+        if (!fotosInput.files || fotosInput.files.length === 0) { NOTIFICACOES.erro('Anexe pelo menos uma foto de evidência!'); return; }
         if (assinatura === 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==') {
             NOTIFICACOES.erro('Assine o documento para confirmar!');
             return;
         }
 
-        const updates = {
-            status: status === 'finalizado' ? 'finalizada' : 'pendente',
-            descricaoFinal: descricao,
-            dataFechamento: `${data}T${hora}`,
-            assinaturaManutentor: assinatura,
-            fotoEvidencia: fotoEvidencia.name
-        };
-
         try {
+            // Converter múltiplas fotos para base64
+            const fotosBase64 = [];
+            for (let i = 0; i < fotosInput.files.length; i++) {
+                const foto = fotosInput.files[i];
+                const base64 = await new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result);
+                    reader.readAsDataURL(foto);
+                });
+                fotosBase64.push(base64);
+            }
+
+            // Preparar relatório de fechamento
+            const relatorioFechamento = {
+                statusFinal: status,
+                descricaoExecucao: descricao,
+                dataFechamento: `${data}T${hora}`,
+                assinaturaManutentor: assinatura,
+                fotosEvidencia: fotosBase64,
+                totalFotos: fotosBase64.length
+            };
+
+            const updates = {
+                status: status === 'finalizado' ? 'finalizada' : 'pendente',
+                descricaoFinal: descricao,
+                dataFechamento: `${data}T${hora}`,
+                assinaturaManutentor: assinatura,
+                fotosEvidencia: fotosBase64,
+                relatorioFechamento: relatorioFechamento
+            };
+
             await DB.atualizarOS(osId, updates);
-            NOTIFICACOES.sucesso(`O.S. ${status === 'finalizado' ? 'finalizada' : 'marcada como pendente'} com sucesso!`);
+            NOTIFICACOES.sucesso(`O.S. ${status === 'finalizado' ? 'finalizada' : 'marcada como pendente'} com sucesso! ${fotosBase64.length} foto(s) salva(s).`);
 
             if (status === 'finalizado') {
                 setTimeout(() => UI.renderModoAuditoria(osId), 1500);
@@ -1869,6 +1905,26 @@ const RELATORIOS = {
         });
 
         this.exportarPDF(html, 'HistoricoMaquinas');
+    },
+
+    async listarRelatoriosFechamento() {
+        const os = await DB.obterOS();
+        const osComRelatorio = os.filter(o => o.relatorioFechamento && o.relatorioFechamento.fotosEvidencia);
+
+        let html = '<h2>Relatórios de Fechamento de O.S.</h2>';
+        html += `<p>Data: ${new Date().toLocaleDateString('pt-BR')}</p>`;
+        
+        if (osComRelatorio.length === 0) {
+            html += '<p style="color: #999;">Nenhum relatório de fechamento encontrado.</p>';
+        } else {
+            html += '<table class="table"><thead><tr><th>O.S.</th><th>Máquina</th><th>Status</th><th>Fotos</th><th>Data</th></tr></thead><tbody>';
+            osComRelatorio.forEach(o => {
+                html += `<tr><td>${o.id}</td><td>${o.maquinaId}</td><td>${o.relatorioFechamento.statusFinal}</td><td>${o.relatorioFechamento.totalFotos || 0}</td><td>${o.relatorioFechamento.dataFechamento ? new Date(o.relatorioFechamento.dataFechamento).toLocaleDateString('pt-BR') : '--'}</td></tr>`;
+            });
+            html += '</tbody></table>';
+        }
+
+        this.exportarPDF(html, 'RelatorioFechamento');
     },
 
     exportarPDF(html, nome) {
@@ -2183,7 +2239,10 @@ UI.iniciarChecklistPreventivo = function(agendaId) {
                 <p class="dashboard-subtitle">${item.tipo_manutencao} - ${item.nome_maquina}</p>
             </div>
             <div class="card">
-                <h3 class="card-title">Itens do Checklist</h3>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3 class="card-title" style="margin: 0;">Itens do Checklist</h3>
+                    <button class="btn btn-sm btn-success" onclick="UI.adicionarItemChecklist()">➕ Adicionar Item</button>
+                </div>
                 <div id="checklist-items">
                     ${itens.map((it, idx) => `
                         <div style="padding: 10px; border-bottom: 1px solid #eee; display: flex; align-items: center;">
@@ -2192,16 +2251,56 @@ UI.iniciarChecklistPreventivo = function(agendaId) {
                         </div>
                     `).join('')}
                 </div>
+                <div style="margin-top: 15px; padding: 10px; background: #f5f5f5; border-radius: 6px;">
+                    <label class="form-label">Observacoes Gerais (Opcional)</label>
+                    <textarea id="checklistObservacoes" class="form-control" placeholder="Observacoes sobre a manutencao..." rows="2"></textarea>
+                </div>
                 <button class="btn btn-success btn-block" style="margin-top: 20px;" onclick="UI.finalizarChecklistPreventivo('${agendaId}')">✅ Finalizar Checklist</button>
             </div>
         `;
     });
 };
 
+UI.adicionarItemChecklist = function() {
+    const descricao = prompt('Descreva o novo item do checklist:');
+    if (!descricao || !descricao.trim()) return;
+
+    const container = document.getElementById('checklist-items');
+    const idx = container.querySelectorAll('input[type="checkbox"]').length;
+    const div = document.createElement('div');
+    div.style.cssText = 'padding: 10px; border-bottom: 1px solid #eee; display: flex; align-items: center;';
+    div.innerHTML = `
+        <input type="checkbox" id="item-${idx}" style="width: 20px; height: 20px; margin-right: 10px;">
+        <label for="item-${idx}" style="flex: 1; cursor: pointer;">${descricao}</label>
+    `;
+    container.appendChild(div);
+    NOTIFICACOES.sucesso('Item adicionado ao checklist!');
+};
+
 UI.finalizarChecklistPreventivo = async function(agendaId) {
     try {
-        await DB.atualizarAgendamento(agendaId, 'concluido');
-        NOTIFICACOES.sucesso('Checklist finalizado com sucesso!');
+        // Coletar todos os itens do checklist com status
+        const itens = [];
+        const checkboxes = document.querySelectorAll('#checklist-items input[type="checkbox"]');
+        checkboxes.forEach((cb, idx) => {
+            const label = cb.nextElementSibling?.textContent || '';
+            itens.push({
+                descricao: label,
+                status: cb.checked ? 'ok' : 'pendente'
+            });
+        });
+
+        // Coletar observacoes gerais se existirem
+        const observacoes = document.getElementById('checklistObservacoes')?.value || '';
+
+        // Salvar no banco com dados do checklist
+        await DB.atualizarAgendamento(agendaId, 'concluido', {
+            itens,
+            observacoes,
+            laudoGerado: true
+        });
+
+        NOTIFICACOES.sucesso('Checklist finalizado e salvo com sucesso!');
         setTimeout(() => UI.renderChecklistPreventivo(), 1500);
     } catch(e) {
         NOTIFICACOES.erro(e.message || 'Erro ao finalizar checklist.');
@@ -2479,10 +2578,29 @@ const UI_MANUAIS_PCM = {
         }
 
         try {
-            await MANUAIS_DB.adicionarEquipamento(idMaquina, modeloMaquina, arquivoPDF);
-            alert('✅ Equipamento cadastrado com sucesso!');
-            document.getElementById('formCadastroManuais').reset();
-            this.renderListaManuais();
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const base64PDF = e.target.result;
+                
+                const resp = await fetch(`${API_BASE}/maquinas`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        id: idMaquina,
+                        manual_pdf: base64PDF,
+                        modelo: modeloMaquina
+                    })
+                });
+                
+                if (resp.ok) {
+                    alert('✅ Manual salvo no banco de dados com sucesso!');
+                    document.getElementById('formCadastroManuais').reset();
+                    this.renderListaManuais();
+                } else {
+                    alert('❌ Erro ao salvar manual no banco.');
+                }
+            };
+            reader.readAsDataURL(arquivoPDF);
         } catch (erro) {
             alert('❌ Erro ao salvar: ' + erro);
         }
