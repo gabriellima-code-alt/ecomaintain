@@ -294,17 +294,11 @@ const DB = {
         return data.agendamento;
     },
 
-    async atualizarAgendamento(id, status, checklistData = null) {
-        const body = { id, status };
-        if (checklistData) {
-            body.checklist_itens = checklistData.itens || [];
-            body.checklist_observacoes = checklistData.observacoes || null;
-            body.laudo_gerado = checklistData.laudoGerado || false;
-        }
+    async atualizarAgendamento(id, status, laudo_dados = null, laudo_pdf = null) {
         const resp = await fetch(`${API_BASE}/agenda-preventiva`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
+            body: JSON.stringify({ id, status, laudo_dados, laudo_pdf })
         });
         if (!resp.ok) {
             const data = await resp.json();
@@ -561,6 +555,15 @@ const UI = {
                             </div>
                         </div>
                     </div>
+                    <div class="row" style="margin-top: 15px;">
+                        <div class="col">
+                            <div class="form-group">
+                                <label class="form-label">📷 Foto Inicial (Opcional)</label>
+                                <input type="file" id="osPhotoInicial" class="form-control" accept="image/*" capture="environment">
+                                <small style="color: #757575;">Tire uma foto do problema para o relatório</small>
+                            </div>
+                        </div>
+                    </div>
 
                     <div class="form-group">
                         <label class="form-label">Anexar Foto (Opcional)</label>
@@ -722,10 +725,9 @@ const UI = {
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label">Anexar Evidências (Fotos) <span style="color: red;">*</span></label>
-                    <input type="file" id="fotoEvidencia" class="form-control" accept="image/*" multiple>
-                    <small style="color: #757575;">Selecione uma ou mais fotos (obrigatório)</small>
-                    <div id="previewFotos" style="margin-top: 10px; display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px;"></div>
+                    <label class="form-label">Anexar Evidências (Foto Final) <span style="color: red;">*</span></label>
+                    <input type="file" id="fotoEvidencia" class="form-control" accept="image/*">
+                    <small style="color: #757575;">Foto obrigatória para finalizar</small>
                 </div>
 
                 <div class="form-group">
@@ -1038,15 +1040,23 @@ const UI = {
         const horas = Math.floor(tempoTotal / 3600000);
         const minutos = Math.floor((tempoTotal % 3600000) / 60000);
 
-        alert(`
-Ordem de Serviço: ${os.id}
-Máquina: ${os.maquinaId}
-Problema: ${os.descricao}
-Status: ${os.status}
-Data Criação: ${os.dataCriacao}
-Apontamentos: ${os.apontamentos ? os.apontamentos.length : 0}
-Tempo Total: ${horas}h ${minutos}m
-        `);
+        // Mostrar modal com opções
+        const modal = document.createElement('div');
+        modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10000;';
+        modal.innerHTML = `
+            <div style="background: white; padding: 30px; border-radius: 10px; max-width: 500px; width: 90%;">
+                <h2 style="margin-top: 0; color: #2c3e50;">Ordem de Serviço: ${os.id}</h2>
+                <p><strong>Máquina:</strong> ${os.maquinaId}</p>
+                <p><strong>Status:</strong> ${os.status}</p>
+                <p><strong>Tempo Total:</strong> ${horas}h ${minutos}m</p>
+                <p><strong>Descrição:</strong> ${os.descricao}</p>
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button class="btn btn-primary" onclick="RELATORIO_OS.gerarRelatorioPDF('${osId}'); this.closest('div').parentElement.remove();">📄 Gerar Relatório PDF</button>
+                    <button class="btn btn-secondary" onclick="this.closest('div').parentElement.remove();">Fechar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
     },
 
     // Renderizar Estoque (PCM)
@@ -1300,12 +1310,6 @@ Tempo Total: ${horas}h ${minutos}m
                     <p class="card-text">Todas as manutenções realizadas por máquina</p>
                     <button class="btn btn-primary btn-block" onclick="RELATORIOS.gerarHistoricoMaquinas()">Gerar Relatório</button>
                 </div>
-
-                <div class="card">
-                    <h3 class="card-title">📸 Fechamento de O.S.</h3>
-                    <p class="card-text">Relatórios com evidências fotográficas e assinaturas</p>
-                    <button class="btn btn-primary btn-block" onclick="RELATORIOS.listarRelatoriosFechamento()">Visualizar Relatórios</button>
-                </div>
             </div>
         `;
     }
@@ -1397,6 +1401,7 @@ const OS = {
         const descricao = document.getElementById('osDescricao').value;
         const data = document.getElementById('osData').value;
         const hora = document.getElementById('osHora').value;
+        const fotoInicialInput = document.getElementById('osPhotoInicial');
 
         if (!maquinaId) {
             NOTIFICACOES.erro('Digite o ID da máquina!');
@@ -1408,13 +1413,21 @@ const OS = {
         }
 
         const user = DB.getCurrentUser();
+        let fotoInicial = null;
+
+        // Converter foto inicial para Base64 se fornecida
+        if (fotoInicialInput && fotoInicialInput.files.length > 0) {
+            fotoInicial = await UI.converterArquivoParaBase64(fotoInicialInput.files[0]);
+        }
+
         const novaOS = {
             maquinaId,
             descricao,
             dataCriacao: `${data}T${hora}`,
             manutentor: user.nome,
             idManutentor: user.id,
-            status: 'ativa'
+            status: 'ativa',
+            fotoInicial: fotoInicial
         };
 
         try {
@@ -1518,15 +1531,31 @@ const PECAS = {
 
         const linhas = document.querySelectorAll('.peca-item');
         const pecasParaRegistrar = [];
+        const pecasDisponiveis = await DB.obterPecas();
 
-        linhas.forEach(linha => {
+        // Validar estoque antes de registrar
+        for (let linha of linhas) {
             const pecaId = linha.querySelector('.peca-select').value;
             const quantidade = parseInt(linha.querySelector('.peca-quantidade').value) || 0;
 
             if (pecaId && quantidade > 0) {
+                // Encontrar a peça no estoque
+                const pecaEstoque = pecasDisponiveis.find(p => p.id === pecaId);
+                
+                if (!pecaEstoque) {
+                    NOTIFICACOES.erro(`Peça ${pecaId} não encontrada no estoque!`);
+                    return;
+                }
+
+                // Validar quantidade disponível
+                if (quantidade > pecaEstoque.quantidade) {
+                    NOTIFICACOES.erro(`⚠️ Peça "${pecaEstoque.nome}" possui apenas ${pecaEstoque.quantidade} unidade(s) em estoque, mas você tentou usar ${quantidade}!`);
+                    return;
+                }
+
                 pecasParaRegistrar.push({ pecaId, quantidade });
             }
-        });
+        }
 
         if (pecasParaRegistrar.length === 0) {
             NOTIFICACOES.aviso('Nenhuma peça foi registrada!');
@@ -1554,52 +1583,32 @@ const FECHAMENTO = {
         const descricao = document.getElementById('descricaoServico').value;
         const data = document.getElementById('dataConclusao').value;
         const hora = document.getElementById('horaConclusao').value;
-        const fotosInput = document.getElementById('fotoEvidencia');
+        const fotoEvidencia = document.getElementById('fotoEvidencia').files[0];
         const assinatura = document.getElementById('signatureCanvas').toDataURL();
 
         if (!osId) { NOTIFICACOES.erro('Selecione uma O.S.!'); return; }
         if (!status) { NOTIFICACOES.erro('Selecione o status final!'); return; }
         if (!descricao || descricao.length < 10) { NOTIFICACOES.erro('Descrição deve ter no mínimo 10 caracteres!'); return; }
-        if (!fotosInput.files || fotosInput.files.length === 0) { NOTIFICACOES.erro('Anexe pelo menos uma foto de evidência!'); return; }
-        if (assinatura === 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==') {
-            NOTIFICACOES.erro('Assine o documento para confirmar!');
+        if (!fotoEvidencia) { NOTIFICACOES.erro('Anexe uma foto de evidência!'); return; }
+        
+        // Validar assinatura obrigatória (verificar se está vazia ou é a imagem padrão)
+        const assinaturaVazia = assinatura === 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+        if (assinaturaVazia || assinatura.length < 100) {
+            NOTIFICACOES.erro('⚠️ ASSINATURA OBRIGATÓRIA! Você deve assinar digitalmente o documento para confirmar a finalização da Ordem de Serviço.');
             return;
         }
 
+        const updates = {
+            status: status === 'finalizado' ? 'finalizada' : 'pendente',
+            descricaoFinal: descricao,
+            dataFechamento: `${data}T${hora}`,
+            assinaturaManutentor: assinatura,
+            fotoEvidencia: fotoEvidencia.name
+        };
+
         try {
-            // Converter múltiplas fotos para base64
-            const fotosBase64 = [];
-            for (let i = 0; i < fotosInput.files.length; i++) {
-                const foto = fotosInput.files[i];
-                const base64 = await new Promise((resolve) => {
-                    const reader = new FileReader();
-                    reader.onload = () => resolve(reader.result);
-                    reader.readAsDataURL(foto);
-                });
-                fotosBase64.push(base64);
-            }
-
-            // Preparar relatório de fechamento
-            const relatorioFechamento = {
-                statusFinal: status,
-                descricaoExecucao: descricao,
-                dataFechamento: `${data}T${hora}`,
-                assinaturaManutentor: assinatura,
-                fotosEvidencia: fotosBase64,
-                totalFotos: fotosBase64.length
-            };
-
-            const updates = {
-                status: status === 'finalizado' ? 'finalizada' : 'pendente',
-                descricaoFinal: descricao,
-                dataFechamento: `${data}T${hora}`,
-                assinaturaManutentor: assinatura,
-                fotosEvidencia: fotosBase64,
-                relatorioFechamento: relatorioFechamento
-            };
-
             await DB.atualizarOS(osId, updates);
-            NOTIFICACOES.sucesso(`O.S. ${status === 'finalizado' ? 'finalizada' : 'marcada como pendente'} com sucesso! ${fotosBase64.length} foto(s) salva(s).`);
+            NOTIFICACOES.sucesso(`O.S. ${status === 'finalizado' ? 'finalizada' : 'marcada como pendente'} com sucesso!`);
 
             if (status === 'finalizado') {
                 setTimeout(() => UI.renderModoAuditoria(osId), 1500);
@@ -1907,26 +1916,6 @@ const RELATORIOS = {
         this.exportarPDF(html, 'HistoricoMaquinas');
     },
 
-    async listarRelatoriosFechamento() {
-        const os = await DB.obterOS();
-        const osComRelatorio = os.filter(o => o.relatorioFechamento && o.relatorioFechamento.fotosEvidencia);
-
-        let html = '<h2>Relatórios de Fechamento de O.S.</h2>';
-        html += `<p>Data: ${new Date().toLocaleDateString('pt-BR')}</p>`;
-        
-        if (osComRelatorio.length === 0) {
-            html += '<p style="color: #999;">Nenhum relatório de fechamento encontrado.</p>';
-        } else {
-            html += '<table class="table"><thead><tr><th>O.S.</th><th>Máquina</th><th>Status</th><th>Fotos</th><th>Data</th></tr></thead><tbody>';
-            osComRelatorio.forEach(o => {
-                html += `<tr><td>${o.id}</td><td>${o.maquinaId}</td><td>${o.relatorioFechamento.statusFinal}</td><td>${o.relatorioFechamento.totalFotos || 0}</td><td>${o.relatorioFechamento.dataFechamento ? new Date(o.relatorioFechamento.dataFechamento).toLocaleDateString('pt-BR') : '--'}</td></tr>`;
-            });
-            html += '</tbody></table>';
-        }
-
-        this.exportarPDF(html, 'RelatorioFechamento');
-    },
-
     exportarPDF(html, nome) {
         const element = document.createElement('div');
         element.innerHTML = `
@@ -2199,7 +2188,10 @@ UI.renderChecklistPreventivo = async function() {
     const agenda = await DB.obterAgendaPreventiva(user.id);
     const maquinas = await DB.obterMaquinas();
 
-    const html = agenda.map(item => {
+    // Filtrar apenas agendamentos pendentes para o manutentor
+    const agendaPendente = agenda.filter(item => item.status === 'pendente');
+
+    const html = agendaPendente.map(item => {
         const maquina = maquinas.find(m => m.id === item.id_maquina);
         return `
             <div class="card" style="padding: 15px; cursor: pointer;" onclick="UI.iniciarChecklistPreventivo('${item.id}')">
@@ -2239,70 +2231,184 @@ UI.iniciarChecklistPreventivo = function(agendaId) {
                 <p class="dashboard-subtitle">${item.tipo_manutencao} - ${item.nome_maquina}</p>
             </div>
             <div class="card">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                    <h3 class="card-title" style="margin: 0;">Itens do Checklist</h3>
-                    <button class="btn btn-sm btn-success" onclick="UI.adicionarItemChecklist()">➕ Adicionar Item</button>
-                </div>
+                <h3 class="card-title">Itens do Checklist</h3>
                 <div id="checklist-items">
                     ${itens.map((it, idx) => `
-                        <div style="padding: 10px; border-bottom: 1px solid #eee; display: flex; align-items: center;">
-                            <input type="checkbox" id="item-${idx}" style="width: 20px; height: 20px; margin-right: 10px;">
-                            <label for="item-${idx}" style="flex: 1; cursor: pointer;">${it}</label>
+                        <div style="padding: 15px; border-bottom: 1px solid #eee;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                                <span style="flex: 1; font-weight: 500;">${it}</span>
+                                <div style="display: flex; gap: 10px;">
+                                    <button class="btn btn-sm btn-outline-success" id="btn-ok-${idx}" onclick="UI.marcarChecklistItem('${idx}', true)">Conforme</button>
+                                    <button class="btn btn-sm btn-outline-danger" id="btn-nok-${idx}" onclick="UI.marcarChecklistItem('${idx}', false)">Não Conforme</button>
+                                </div>
+                            </div>
+                            <div id="obs-container-${idx}" style="display: none; margin-top: 10px;">
+                                <label style="font-size: 0.85em; color: #666;">Descreva o problema:</label>
+                                <textarea id="obs-${idx}" class="form-control" style="height: 60px; margin-top: 5px;" placeholder="O que está incorreto?"></textarea>
+                            </div>
+                            <input type="hidden" id="status-${idx}" value="">
                         </div>
                     `).join('')}
                 </div>
-                <div style="margin-top: 15px; padding: 10px; background: #f5f5f5; border-radius: 6px;">
-                    <label class="form-label">Observacoes Gerais (Opcional)</label>
-                    <textarea id="checklistObservacoes" class="form-control" placeholder="Observacoes sobre a manutencao..." rows="2"></textarea>
+                <div id="itens-adicionados-container"></div>
+                
+                <div style="padding: 15px; background: #f8f9fa; border-radius: 5px; margin-top: 15px;">
+                    <h4 style="margin-top: 0; color: #2c3e50;">Adicionar Item Personalizado</h4>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="text" id="novo-item-input" class="form-control" placeholder="Digite o novo item" style="flex: 1;">
+                        <button class="btn btn-primary" onclick="UI.adicionarItemChecklist()">+ Adicionar</button>
+                    </div>
                 </div>
-                <button class="btn btn-success btn-block" style="margin-top: 20px;" onclick="UI.finalizarChecklistPreventivo('${agendaId}')">✅ Finalizar Checklist</button>
+                
+                <button class="btn btn-success btn-block" style="margin-top: 20px;" onclick="UI.finalizarChecklistPreventivo('${agendaId}')">✅ Finalizar e Gerar Laudo</button>
             </div>
         `;
+        
+        // Inicializar array de itens adicionados
+        if (!window.checklistItensAdicionados) {
+            window.checklistItensAdicionados = [];
+        }
+        UI.renderItensAdicionados();
     });
 };
 
-UI.adicionarItemChecklist = function() {
-    const descricao = prompt('Descreva o novo item do checklist:');
-    if (!descricao || !descricao.trim()) return;
+UI.marcarChecklistItem = function(idx, conforme) {
+    const btnOk = document.getElementById(`btn-ok-${idx}`);
+    const btnNok = document.getElementById(`btn-nok-${idx}`);
+    const obsContainer = document.getElementById(`obs-container-${idx}`);
+    const statusInput = document.getElementById(`status-${idx}`);
 
-    const container = document.getElementById('checklist-items');
-    const idx = container.querySelectorAll('input[type="checkbox"]').length;
-    const div = document.createElement('div');
-    div.style.cssText = 'padding: 10px; border-bottom: 1px solid #eee; display: flex; align-items: center;';
-    div.innerHTML = `
-        <input type="checkbox" id="item-${idx}" style="width: 20px; height: 20px; margin-right: 10px;">
-        <label for="item-${idx}" style="flex: 1; cursor: pointer;">${descricao}</label>
-    `;
-    container.appendChild(div);
-    NOTIFICACOES.sucesso('Item adicionado ao checklist!');
+    if (conforme) {
+        btnOk.className = 'btn btn-sm btn-success';
+        btnNok.className = 'btn btn-sm btn-outline-danger';
+        obsContainer.style.display = 'none';
+        statusInput.value = 'conforme';
+    } else {
+        btnOk.className = 'btn btn-sm btn-outline-success';
+        btnNok.className = 'btn btn-sm btn-danger';
+        obsContainer.style.display = 'block';
+        statusInput.value = 'nao_conforme';
+    }
 };
 
 UI.finalizarChecklistPreventivo = async function(agendaId) {
     try {
-        // Coletar todos os itens do checklist com status
-        const itens = [];
-        const checkboxes = document.querySelectorAll('#checklist-items input[type="checkbox"]');
-        checkboxes.forEach((cb, idx) => {
-            const label = cb.nextElementSibling?.textContent || '';
-            itens.push({
-                descricao: label,
-                status: cb.checked ? 'ok' : 'pendente'
+        const agenda = await DB.obterAgendaPreventiva();
+        const item = agenda.find(a => a.id === agendaId);
+        if (!item) throw new Error('Agendamento não encontrado.');
+
+        const itensChecklist = CHECKLIST_TEMPLATES[item.tipo_manutencao] || [];
+        const resultados = [];
+        let todosMarcados = true;
+
+        itensChecklist.forEach((it, idx) => {
+            const status = document.getElementById(`status-${idx}`).value;
+            const observacao = document.getElementById(`obs-${idx}`).value;
+            
+            if (!status) todosMarcados = false;
+            
+            resultados.push({
+                item: it,
+                status: status === 'conforme' ? 'Conforme' : 'Não Conforme',
+                observacao: status === 'nao_conforme' ? observacao : ''
             });
         });
 
-        // Coletar observacoes gerais se existirem
-        const observacoes = document.getElementById('checklistObservacoes')?.value || '';
 
-        // Salvar no banco com dados do checklist
-        await DB.atualizarAgendamento(agendaId, 'concluido', {
-            itens,
-            observacoes,
-            laudoGerado: true
-        });
+        // Incluir itens adicionados
+        if (window.checklistItensAdicionados && window.checklistItensAdicionados.length > 0) {
+            window.checklistItensAdicionados.forEach((item, idx) => {
+                const status = document.getElementById(`status-add-${idx}`).value;
+                const observacao = document.getElementById(`obs-add-${idx}`).value;
+                
+                if (!status) todosMarcados = false;
+                
+                resultados.push({
+                    item: item,
+                    status: status === 'conforme' ? 'Conforme' : 'Não Conforme',
+                    observacao: status === 'nao_conforme' ? observacao : ''
+                });
+            });
+        }
 
-        NOTIFICACOES.sucesso('Checklist finalizado e salvo com sucesso!');
+        if (!todosMarcados) {
+            NOTIFICACOES.erro('Por favor, responda todos os itens do checklist.');
+            return;
+        }
+
+        // Criar elemento oculto para o PDF
+        const laudoId = `laudo-${Date.now()}`;
+        const container = document.createElement('div');
+        container.id = laudoId;
+        container.style.padding = '40px';
+        container.style.fontFamily = 'Arial, sans-serif';
+        container.innerHTML = `
+            <div style="text-align: center; border-bottom: 2px solid #2c3e50; padding-bottom: 20px; margin-bottom: 20px;">
+                <h1 style="color: #2c3e50; margin: 0;">LAUDO TÉCNICO DE MANUTENÇÃO</h1>
+                <p style="color: #7f8c8d; margin: 5px 0;">EcoMaintain - Sistema de Gestão de Manutenção</p>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px;">
+                <div>
+                    <p><strong>ID Agendamento:</strong> ${item.id}</p>
+                    <p><strong>Máquina:</strong> ${item.nome_maquina} (${item.id_maquina})</p>
+                    <p><strong>Tipo:</strong> ${item.tipo_manutencao}</p>
+                </div>
+                <div>
+                    <p><strong>Manutentor:</strong> ${item.nome_usuario}</p>
+                    <p><strong>Data Programada:</strong> ${item.data_programada}</p>
+                    <p><strong>Data Conclusão:</strong> ${new Date().toLocaleString('pt-BR')}</p>
+                </div>
+            </div>
+
+            <h3 style="background: #f8f9fa; padding: 10px; border-left: 5px solid #28a745;">Itens Verificados</h3>
+            <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+                <thead>
+                    <tr style="background: #eee;">
+                        <th style="border: 1px solid #ddd; padding: 10px; text-align: left;">Item</th>
+                        <th style="border: 1px solid #ddd; padding: 10px; text-align: center; width: 120px;">Status</th>
+                        <th style="border: 1px solid #ddd; padding: 10px; text-align: left;">Observações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${resultados.map(r => `
+                        <tr>
+                            <td style="border: 1px solid #ddd; padding: 10px;">${r.item}</td>
+                            <td style="border: 1px solid #ddd; padding: 10px; text-align: center; color: ${r.status === 'Conforme' ? '#28a745' : '#dc3545'}; font-weight: bold;">${r.status}</td>
+                            <td style="border: 1px solid #ddd; padding: 10px;">${r.observacao || '-'}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+
+            <div style="margin-top: 50px; display: flex; justify-content: space-around;">
+                <div style="text-align: center; border-top: 1px solid #000; width: 200px; padding-top: 5px;">
+                    <p style="margin: 0; font-size: 0.9em;">${item.nome_usuario}</p>
+                    <p style="margin: 0; font-size: 0.8em; color: #666;">Manutentor Responsável</p>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(container);
+
+        // Gerar PDF como Base64
+        const opt = {
+            margin: 10,
+            filename: `laudo_${item.id}.pdf`,
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: { scale: 2 },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        };
+
+        const pdfBase64 = await html2pdf().from(container).set(opt).outputPdf('datauristring');
+        document.body.removeChild(container);
+
+        // Salvar no banco de dados
+        await DB.atualizarAgendamento(agendaId, 'concluido', JSON.stringify(resultados), pdfBase64);
+        
+        NOTIFICACOES.sucesso('Checklist finalizado e laudo gerado com sucesso!');
         setTimeout(() => UI.renderChecklistPreventivo(), 1500);
     } catch(e) {
+        console.error(e);
         NOTIFICACOES.erro(e.message || 'Erro ao finalizar checklist.');
     }
 };
@@ -2375,7 +2481,10 @@ UI.renderAgendaPreventiva = async function() {
                             <td>${a.data_programada}</td>
                             <td><span class="badge ${a.status === 'concluido' ? 'badge-success' : 'badge-warning'}">${a.status}</span></td>
                             <td>
-                                <button class="btn btn-sm btn-danger" onclick="PCM.removerAgendamentoPreventivo('${a.id}')">Remover</button>
+                                <div style="display: flex; gap: 5px;">
+                                    ${a.laudo_pdf ? `<button class="btn btn-sm btn-info" onclick="UI.baixarLaudo('${a.id}')">📄 Laudo</button>` : ''}
+                                    <button class="btn btn-sm btn-danger" onclick="PCM.removerAgendamentoPreventivo('${a.id}')">Remover</button>
+                                </div>
                             </td>
                         </tr>
                     `).join('')}
@@ -2391,94 +2500,83 @@ UI.renderAgendaPreventiva = async function() {
 // ============================================
 
 const MANUAIS_DB = {
-    DB_NAME: "EcoMaintainDB_Pro",
-    STORE_NAME: "equipamentos",
-
-    abrirDB() {
-        return new Promise((resolve, reject) => {
-            const request = indexedDB.open(this.DB_NAME, 2);
-            request.onupgradeneeded = (e) => {
-                const db = e.target.result;
-                if (!db.objectStoreNames.contains(this.STORE_NAME)) {
-                    db.createObjectStore(this.STORE_NAME, { keyPath: "id" });
-                }
-            };
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject("Erro ao acessar banco de dados.");
-        });
+    // API para gerenciar manuais no banco de dados Neon
+    async obterManuaisMaquina(idMaquina) {
+        try {
+            const resp = await fetch(`${API_BASE}/manuais?idMaquina=${idMaquina}`);
+            if (!resp.ok) throw new Error('Erro ao buscar manuais');
+            return await resp.json();
+        } catch(e) {
+            console.error(e);
+            return [];
+        }
     },
 
-    async adicionarEquipamento(id, modelo, pdfFile) {
-        const db = await this.abrirDB();
-        const tx = db.transaction(this.STORE_NAME, "readwrite");
-        const store = tx.objectStore(this.STORE_NAME);
-
-        const novoEquipamento = {
-            id: id.toUpperCase().trim(),
-            modelo: modelo.trim(),
-            pdfFile: pdfFile,
-            baixado: false,
-            tamanho: (pdfFile.size / 1024 / 1024).toFixed(2) + " MB",
-            dataCadastro: new Date().toISOString()
-        };
-
-        return new Promise((resolve, reject) => {
-            const request = store.put(novoEquipamento);
-            request.onsuccess = () => resolve(novoEquipamento);
-            request.onerror = () => reject("Erro ao salvar equipamento.");
-        });
+    async obterTodosManuais() {
+        try {
+            const resp = await fetch(`${API_BASE}/manuais`);
+            if (!resp.ok) throw new Error('Erro ao buscar manuais');
+            return await resp.json();
+        } catch(e) {
+            console.error(e);
+            return [];
+        }
     },
 
-    async obterEquipamentos() {
-        const db = await this.abrirDB();
-        const tx = db.transaction(this.STORE_NAME, "readonly");
-        const store = tx.objectStore(this.STORE_NAME);
-        return new Promise((resolve, reject) => {
-            const request = store.getAll();
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject("Erro ao obter equipamentos.");
-        });
+    async adicionarManual(idMaquina, nomeMaquina, nomeArquivo, arquivoPDF, tamanhoMb) {
+        try {
+            const resp = await fetch(`${API_BASE}/manuais`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id_maquina: idMaquina,
+                    nome_maquina: nomeMaquina,
+                    nome_arquivo: nomeArquivo,
+                    arquivo_pdf: arquivoPDF,
+                    tamanho_mb: tamanhoMb
+                })
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.erro || 'Erro ao adicionar manual');
+            return data.manual;
+        } catch(e) {
+            console.error(e);
+            throw e;
+        }
     },
 
-    async obterEquipamento(id) {
-        const db = await this.abrirDB();
-        const tx = db.transaction(this.STORE_NAME, "readonly");
-        const store = tx.objectStore(this.STORE_NAME);
-        return new Promise((resolve, reject) => {
-            const request = store.get(id);
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject("Erro ao obter equipamento.");
-        });
+    async atualizarManual(id, arquivoPDF, tamanhoMb) {
+        try {
+            const resp = await fetch(`${API_BASE}/manuais`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id: id,
+                    arquivo_pdf: arquivoPDF,
+                    tamanho_mb: tamanhoMb
+                })
+            });
+            if (!resp.ok) {
+                const data = await resp.json();
+                throw new Error(data.erro || 'Erro ao atualizar manual');
+            }
+        } catch(e) {
+            console.error(e);
+            throw e;
+        }
     },
 
-    async substituirPDF(id, novoFile) {
-        const db = await this.abrirDB();
-        const tx = db.transaction(this.STORE_NAME, "readwrite");
-        const store = tx.objectStore(this.STORE_NAME);
-        const req = store.get(id);
-        return new Promise((resolve, reject) => {
-            req.onsuccess = () => {
-                const maq = req.result;
-                if (maq) {
-                    maq.pdfFile = novoFile;
-                    maq.tamanho = (novoFile.size / 1024 / 1024).toFixed(2) + " MB";
-                    maq.baixado = false;
-                    store.put(maq).onsuccess = () => resolve(maq);
-                }
-            };
-            req.onerror = () => reject("Erro ao substituir PDF.");
-        });
-    },
-
-    async excluirEquipamento(id) {
-        const db = await this.abrirDB();
-        const tx = db.transaction(this.STORE_NAME, "readwrite");
-        const store = tx.objectStore(this.STORE_NAME);
-        return new Promise((resolve, reject) => {
-            const request = store.delete(id);
-            request.onsuccess = () => resolve();
-            request.onerror = () => reject("Erro ao excluir equipamento.");
-        });
+    async excluirManual(id) {
+        try {
+            const resp = await fetch(`${API_BASE}/manuais?id=${id}`, { method: 'DELETE' });
+            if (!resp.ok) {
+                const data = await resp.json();
+                throw new Error(data.erro || 'Erro ao excluir manual');
+            }
+        } catch(e) {
+            console.error(e);
+            throw e;
+        }
     }
 };
 
@@ -2542,7 +2640,7 @@ const UI_MANUAIS_PCM = {
     },
 
     async renderListaManuais() {
-        const equipamentos = await MANUAIS_DB.obterEquipamentos();
+        const equipamentos = await MANUAIS_DB.obterTodosManuais();
         const container = document.getElementById('listaManuaisPCM');
         if (!container) return;
 
@@ -2554,12 +2652,12 @@ const UI_MANUAIS_PCM = {
         container.innerHTML = equipamentos.reverse().map(eq => `
             <div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center;">
                 <div>
-                    <p style="font-weight: bold; margin: 0;">${eq.id}</p>
-                    <p style="font-size: 12px; color: #757575; margin: 5px 0 0 0;">${eq.modelo}</p>
-                    <p style="font-size: 11px; color: #999; margin: 3px 0 0 0;">Tamanho: ${eq.tamanho}</p>
+                    <p style="font-weight: bold; margin: 0;">${eq.nome_maquina}</p>
+                    <p style="font-size: 12px; color: #757575; margin: 5px 0 0 0;">${eq.nome_arquivo}</p>
+                    <p style="font-size: 11px; color: #999; margin: 3px 0 0 0;">Tamanho: ${eq.tamanho_mb} MB | Enviado: ${new Date(eq.data_upload).toLocaleDateString('pt-BR')}</p>
                 </div>
                 <div style="display: flex; gap: 10px;">
-                    <button onclick="UI_MANUAIS_PCM.visualizarPDF('${eq.id}')" class="btn btn-primary btn-sm">👁️ Ver</button>
+                    <button onclick="UI_MANUAIS_PCM.visualizarPDF('${eq.id_maquina}')" class="btn btn-primary btn-sm">👁️ Ver</button>
                     <button onclick="UI_MANUAIS_PCM.substituirPDF('${eq.id}')" class="btn btn-warning btn-sm">🔄 Atualizar</button>
                     <button onclick="UI_MANUAIS_PCM.excluirEquipamento('${eq.id}')" class="btn btn-danger btn-sm">🗑️ Excluir</button>
                 </div>
@@ -2578,29 +2676,10 @@ const UI_MANUAIS_PCM = {
         }
 
         try {
-            const reader = new FileReader();
-            reader.onload = async (e) => {
-                const base64PDF = e.target.result;
-                
-                const resp = await fetch(`${API_BASE}/maquinas`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        id: idMaquina,
-                        manual_pdf: base64PDF,
-                        modelo: modeloMaquina
-                    })
-                });
-                
-                if (resp.ok) {
-                    alert('✅ Manual salvo no banco de dados com sucesso!');
-                    document.getElementById('formCadastroManuais').reset();
-                    this.renderListaManuais();
-                } else {
-                    alert('❌ Erro ao salvar manual no banco.');
-                }
-            };
-            reader.readAsDataURL(arquivoPDF);
+            await MANUAIS_DB.adicionarManual(idMaquina, modeloMaquina, arquivoPDF.name, await UI.converterArquivoParaBase64(arquivoPDF), (arquivoPDF.size / 1024 / 1024).toFixed(2));
+            alert('✅ Equipamento cadastrado com sucesso!');
+            document.getElementById('formCadastroManuais').reset();
+            this.renderListaManuais();
         } catch (erro) {
             alert('❌ Erro ao salvar: ' + erro);
         }
@@ -2608,19 +2687,25 @@ const UI_MANUAIS_PCM = {
 
     async visualizarPDF(id) {
         try {
-            const eq = await MANUAIS_DB.obterEquipamento(id);
-            if (!eq) { alert('Equipamento não encontrado.'); return; }
-
+            const manuais = await MANUAIS_DB.obterManuaisMaquina(id);
+            if (!manuais || manuais.length === 0) { alert('Manual não encontrado.'); return; }
+            
+            const manual = manuais[0];
             const frame = document.getElementById('framePDF');
             if (window.pdfUrlAtiva) URL.revokeObjectURL(window.pdfUrlAtiva);
 
-            const url = URL.createObjectURL(eq.pdfFile);
+            const url = manual.arquivo_pdf;
             window.pdfUrlAtiva = url;
 
-            document.getElementById('nomeManualAtivo').innerText = `Manual: ${eq.id} - ${eq.modelo}`;
+            document.getElementById('nomeManualAtivo').innerText = `Manual: ${manual.nome_maquina} - ${manual.nome_arquivo}`;
             frame.src = url;
             document.getElementById('modalPDFManuais').style.display = 'block';
             document.body.style.overflow = 'hidden';
+        } catch (erro) {
+            alert('Erro ao visualizar: ' + erro);
+        }
+    },
+
         } catch (erro) {
             alert('Erro ao visualizar: ' + erro);
         }
@@ -2641,7 +2726,7 @@ const UI_MANUAIS_PCM = {
             const file = e.target.files[0];
             if (!file) return;
             try {
-                await MANUAIS_DB.substituirPDF(id, file);
+                await MANUAIS_DB.atualizarManual(id, await UI.converterArquivoParaBase64(file), (file.size / 1024 / 1024).toFixed(2));
                 alert('✅ PDF atualizado com sucesso!');
                 this.renderListaManuais();
             } catch (erro) {
@@ -2654,7 +2739,7 @@ const UI_MANUAIS_PCM = {
     async excluirEquipamento(id) {
         if (!confirm('Tem certeza que deseja excluir este manual?')) return;
         try {
-            await MANUAIS_DB.excluirEquipamento(id);
+            await MANUAIS_DB.excluirManual(id);
             alert('✅ Manual excluído com sucesso!');
             this.renderListaManuais();
         } catch (erro) {
@@ -2664,7 +2749,7 @@ const UI_MANUAIS_PCM = {
 
     async filtrarEquipamentos() {
         const termo = document.getElementById('inputBuscaManuais').value.toLowerCase();
-        const equipamentos = await MANUAIS_DB.obterEquipamentos();
+        const equipamentos = await MANUAIS_DB.obterTodosManuais();
         const filtrados = equipamentos.filter(eq =>
             eq.id.toLowerCase().includes(termo) ||
             eq.modelo.toLowerCase().includes(termo)
@@ -2726,7 +2811,7 @@ const UI_MANUAIS_MANUTENTOR = {
     },
 
     async renderListaManuais() {
-        const equipamentos = await MANUAIS_DB.obterEquipamentos();
+        const equipamentos = await MANUAIS_DB.obterTodosManuais();
         const container = document.getElementById('listaManuaisManutentor');
         if (!container) return;
 
@@ -2749,19 +2834,25 @@ const UI_MANUAIS_MANUTENTOR = {
 
     async visualizarPDF(id) {
         try {
-            const eq = await MANUAIS_DB.obterEquipamento(id);
-            if (!eq) { alert('Manual não encontrado.'); return; }
+            const manuais = await MANUAIS_DB.obterManuaisMaquina(id);
+            if (!manuais || manuais.length === 0) { alert('Manual não encontrado.'); return; }
+            
+            const manual = manuais[0];
+            const frame = document.getElementById('framePDF');
+            if (window.pdfUrlAtiva) URL.revokeObjectURL(window.pdfUrlAtiva);
 
-            const frame = document.getElementById('framePDFManutentor');
-            if (window.pdfUrlAtivaManutentor) URL.revokeObjectURL(window.pdfUrlAtivaManutentor);
+            const url = manual.arquivo_pdf;
+            window.pdfUrlAtiva = url;
 
-            const url = URL.createObjectURL(eq.pdfFile);
-            window.pdfUrlAtivaManutentor = url;
-
-            document.getElementById('nomeManualAtivoManutentor').innerText = `Manual: ${eq.id} - ${eq.modelo}`;
+            document.getElementById('nomeManualAtivo').innerText = `Manual: ${manual.nome_maquina} - ${manual.nome_arquivo}`;
             frame.src = url;
-            document.getElementById('modalPDFManutentor').style.display = 'block';
+            document.getElementById('modalPDFManuais').style.display = 'block';
             document.body.style.overflow = 'hidden';
+        } catch (erro) {
+            alert('Erro ao visualizar: ' + erro);
+        }
+    },
+
         } catch (erro) {
             alert('Erro ao visualizar: ' + erro);
         }
@@ -2776,7 +2867,7 @@ const UI_MANUAIS_MANUTENTOR = {
 
     async filtrarEquipamentos() {
         const termo = document.getElementById('inputBuscaManuaisManutentor').value.toLowerCase();
-        const equipamentos = await MANUAIS_DB.obterEquipamentos();
+        const equipamentos = await MANUAIS_DB.obterTodosManuais();
         const filtrados = equipamentos.filter(eq =>
             eq.id.toLowerCase().includes(termo) ||
             eq.modelo.toLowerCase().includes(termo)
@@ -2817,3 +2908,1197 @@ document.addEventListener('DOMContentLoaded', function() {
         UI.renderLogin();
     }
 });
+
+UI.baixarLaudo = async function(agendaId) {
+    try {
+        const agenda = await DB.obterAgendaPreventiva();
+        const item = agenda.find(a => a.id === agendaId);
+        if (!item || !item.laudo_pdf) {
+            NOTIFICACOES.erro('Laudo não encontrado.');
+            return;
+        }
+
+        const link = document.createElement('a');
+        link.href = item.laudo_pdf;
+        link.download = `laudo_${item.id}.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    } catch(e) {
+        NOTIFICACOES.erro('Erro ao baixar laudo.');
+    }
+};
+
+
+UI.adicionarItemChecklist = function() {
+    const input = document.getElementById('novo-item-input');
+    const novoItem = input.value.trim();
+    
+    if (!novoItem) {
+        NOTIFICACOES.erro('Por favor, digite um item válido.');
+        return;
+    }
+    
+    if (!window.checklistItensAdicionados) {
+        window.checklistItensAdicionados = [];
+    }
+    
+    window.checklistItensAdicionados.push(novoItem);
+    input.value = '';
+    UI.renderItensAdicionados();
+};
+
+UI.renderItensAdicionados = function() {
+    const container = document.getElementById('itens-adicionados-container');
+    if (!window.checklistItensAdicionados || window.checklistItensAdicionados.length === 0) {
+        container.innerHTML = '';
+        return;
+    }
+    
+    container.innerHTML = `
+        <div style="margin-top: 15px; border-top: 2px solid #e0e0e0; padding-top: 15px;">
+            <h4 style="color: #2c3e50; margin-top: 0;">Itens Adicionados</h4>
+            ${window.checklistItensAdicionados.map((item, idx) => `
+                <div style="padding: 15px; border-bottom: 1px solid #eee;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                        <span style="flex: 1; font-weight: 500;">${item}</span>
+                        <div style="display: flex; gap: 10px;">
+                            <button class="btn btn-sm btn-outline-success" id="btn-ok-add-${idx}" onclick="UI.marcarChecklistItem('add-${idx}', true)">Conforme</button>
+                            <button class="btn btn-sm btn-outline-danger" id="btn-nok-add-${idx}" onclick="UI.marcarChecklistItem('add-${idx}', false)">Não Conforme</button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="UI.removerItemAdicionado(${idx})">✕ Remover</button>
+                        </div>
+                    </div>
+                    <div id="obs-container-add-${idx}" style="display: none; margin-top: 10px;">
+                        <label style="font-size: 0.85em; color: #666;">Descreva o problema:</label>
+                        <textarea id="obs-add-${idx}" class="form-control" style="height: 60px; margin-top: 5px;" placeholder="O que está incorreto?"></textarea>
+                    </div>
+                    <input type="hidden" id="status-add-${idx}" value="">
+                </div>
+            `).join('')}
+        </div>
+    `;
+};
+
+UI.removerItemAdicionado = function(idx) {
+    window.checklistItensAdicionados.splice(idx, 1);
+    UI.renderItensAdicionados();
+};
+
+
+// Função auxiliar para converter arquivo para Base64
+UI.converterArquivoParaBase64 = function(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject('Erro ao ler arquivo');
+        reader.readAsDataURL(file);
+    });
+};
+
+
+// ============================================
+// RELATÓRIO PROFISSIONAL DE ORDEM DE SERVIÇO (PCM)
+// ============================================
+
+const RELATORIO_OS = {
+    async gerarRelatorioPDF(osId) {
+        try {
+            // Buscar dados completos da OS
+            const os = await DB.obterOrdenServico(osId);
+            if (!os) {
+                NOTIFICACOES.erro('Ordem de serviço não encontrada!');
+                return;
+            }
+
+            // Buscar dados das peças utilizadas
+            const pecasUtilizadas = [];
+            let custoTotalPecas = 0;
+
+            if (os.pecas && os.pecas.length > 0) {
+                const todasAsPecas = await DB.obterPecas();
+                for (const pecaOS of os.pecas) {
+                    const pecaInfo = todasAsPecas.find(p => p.id === pecaOS.pecaId);
+                    if (pecaInfo) {
+                        const custoItem = pecaInfo.valor * pecaOS.quantidade;
+                        custoTotalPecas += custoItem;
+                        pecasUtilizadas.push({
+                            nome: pecaInfo.nome,
+                            quantidade: pecaOS.quantidade,
+                            valor: pecaInfo.valor,
+                            custo: custoItem
+                        });
+                    }
+                }
+            }
+
+            // Calcular tempos
+            const dataCriacao = new Date(os.dataCriacao);
+            const dataFechamento = os.dataFechamento ? new Date(os.dataFechamento) : new Date();
+            const tempoTotalMs = dataFechamento - dataCriacao;
+            const tempoTotalHoras = (tempoTotalMs / (1000 * 60 * 60)).toFixed(2);
+
+            // Calcular tempo em pendência
+            let tempoPendenciaHoras = 0;
+            if (os.dataPendencia && os.dataLiberacao) {
+                const tempoPendenciaMs = new Date(os.dataLiberacao) - new Date(os.dataPendencia);
+                tempoPendenciaHoras = (tempoPendenciaMs / (1000 * 60 * 60)).toFixed(2);
+            }
+
+            // Criar container do relatório
+            const laudoId = `relatorio-os-${Date.now()}`;
+            const container = document.createElement('div');
+            container.id = laudoId;
+            container.style.padding = '40px';
+            container.style.fontFamily = 'Arial, sans-serif';
+            container.style.backgroundColor = 'white';
+
+            // HTML do relatório
+            let htmlRelatorio = `
+                <div style="text-align: center; border-bottom: 3px solid #2c3e50; padding-bottom: 20px; margin-bottom: 30px;">
+                    <h1 style="color: #2c3e50; margin: 0; font-size: 24px;">RELATÓRIO DE ORDEM DE SERVIÇO</h1>
+                    <p style="color: #7f8c8d; margin: 5px 0 0 0; font-size: 12px;">EcoMaintain - Sistema de Gestão de Manutenção</p>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px;">
+                    <div>
+                        <p style="margin: 0 0 10px 0;"><strong style="color: #2c3e50;">ID da Ordem:</strong> ${os.id}</p>
+                        <p style="margin: 0 0 10px 0;"><strong style="color: #2c3e50;">Máquina:</strong> ${os.maquinaId}</p>
+                        <p style="margin: 0 0 10px 0;"><strong style="color: #2c3e50;">Status:</strong> <span style="background: ${os.status === 'concluida' ? '#d4edda' : os.status === 'pendente' ? '#fff3cd' : '#e2e3e5'}; padding: 4px 12px; border-radius: 4px; font-weight: bold;">${os.status.toUpperCase()}</span></p>
+                        <p style="margin: 0 0 10px 0;"><strong style="color: #2c3e50;">Manutentor:</strong> ${os.manutentor || 'N/A'}</p>
+                    </div>
+                    <div>
+                        <p style="margin: 0 0 10px 0;"><strong style="color: #2c3e50;">Data Criação:</strong> ${new Date(os.dataCriacao).toLocaleDateString('pt-BR')} às ${new Date(os.dataCriacao).toLocaleTimeString('pt-BR')}</p>
+                        <p style="margin: 0 0 10px 0;"><strong style="color: #2c3e50;">Data Fechamento:</strong> ${os.dataFechamento ? new Date(os.dataFechamento).toLocaleDateString('pt-BR') + ' às ' + new Date(os.dataFechamento).toLocaleTimeString('pt-BR') : 'Em andamento'}</p>
+                        <p style="margin: 0 0 10px 0;"><strong style="color: #2c3e50;">Tempo Total:</strong> ${tempoTotalHoras} horas</p>
+                        ${tempoPendenciaHoras > 0 ? `<p style="margin: 0 0 10px 0;"><strong style="color: #2c3e50;">Tempo em Pendência:</strong> ${tempoPendenciaHoras} horas</p>` : ''}
+                    </div>
+                </div>
+
+                <h3 style="background: #f8f9fa; padding: 12px; border-left: 5px solid #2c3e50; margin: 20px 0 15px 0; color: #2c3e50;">Descrição do Serviço</h3>
+                <p style="background: #f8f9fa; padding: 15px; border-radius: 4px; line-height: 1.6; color: #555;">${os.descricao}</p>
+
+                ${os.descricaoFinal ? `
+                    <h3 style="background: #f8f9fa; padding: 12px; border-left: 5px solid #28a745; margin: 20px 0 15px 0; color: #2c3e50;">Descrição Final</h3>
+                    <p style="background: #f8f9fa; padding: 15px; border-radius: 4px; line-height: 1.6; color: #555;">${os.descricaoFinal}</p>
+                ` : ''}
+            `;
+
+            // Adicionar fotos se existirem
+            if (os.fotoInicial || os.fotoEvidencia) {
+                htmlRelatorio += `<h3 style="background: #f8f9fa; padding: 12px; border-left: 5px solid #007bff; margin: 20px 0 15px 0; color: #2c3e50;">Evidências Fotográficas</h3>`;
+                
+                if (os.fotoInicial) {
+                    htmlRelatorio += `
+                        <div style="margin-bottom: 20px;">
+                            <p style="font-weight: bold; color: #2c3e50; margin-bottom: 10px;">📷 Foto Inicial (Criação da OS)</p>
+                            <img src="${os.fotoInicial}" style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px;">
+                        </div>
+                    `;
+                }
+
+                if (os.fotoEvidencia) {
+                    htmlRelatorio += `
+                        <div style="margin-bottom: 20px;">
+                            <p style="font-weight: bold; color: #2c3e50; margin-bottom: 10px;">📷 Foto de Evidência (Finalização da OS)</p>
+                            <img src="${os.fotoEvidencia}" style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px;">
+                        </div>
+                    `;
+                }
+            }
+
+            // Adicionar peças utilizadas
+            if (pecasUtilizadas.length > 0) {
+                htmlRelatorio += `
+                    <h3 style="background: #f8f9fa; padding: 12px; border-left: 5px solid #ffc107; margin: 20px 0 15px 0; color: #2c3e50;">Peças Utilizadas</h3>
+                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+                        <thead>
+                            <tr style="background: #2c3e50; color: white;">
+                                <th style="border: 1px solid #ddd; padding: 12px; text-align: left;">Peça</th>
+                                <th style="border: 1px solid #ddd; padding: 12px; text-align: center; width: 100px;">Quantidade</th>
+                                <th style="border: 1px solid #ddd; padding: 12px; text-align: right; width: 100px;">Valor Unit.</th>
+                                <th style="border: 1px solid #ddd; padding: 12px; text-align: right; width: 100px;">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${pecasUtilizadas.map(p => `
+                                <tr>
+                                    <td style="border: 1px solid #ddd; padding: 12px;">${p.nome}</td>
+                                    <td style="border: 1px solid #ddd; padding: 12px; text-align: center;">${p.quantidade}</td>
+                                    <td style="border: 1px solid #ddd; padding: 12px; text-align: right;">R$ ${p.valor.toFixed(2)}</td>
+                                    <td style="border: 1px solid #ddd; padding: 12px; text-align: right; font-weight: bold;">R$ ${p.custo.toFixed(2)}</td>
+                                </tr>
+                            `).join('')}
+                            <tr style="background: #f8f9fa; font-weight: bold;">
+                                <td colspan="3" style="border: 1px solid #ddd; padding: 12px; text-align: right;">CUSTO TOTAL DE PEÇAS:</td>
+                                <td style="border: 1px solid #ddd; padding: 12px; text-align: right; color: #28a745; font-size: 16px;">R$ ${custoTotalPecas.toFixed(2)}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                `;
+            }
+
+            // Assinaturas
+            htmlRelatorio += `
+                <div style="margin-top: 50px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px;">
+                    <div style="text-align: center;">
+                        <p style="margin: 0; font-size: 12px; color: #999;">Assinatura do Manutentor</p>
+                        ${os.assinaturaManutentor ? `<img src="${os.assinaturaManutentor}" style="max-width: 150px; height: 60px; margin-top: 10px;">` : '<div style="border-top: 1px solid #000; width: 100%; margin-top: 20px;"></div>'}
+                        <p style="margin: 5px 0 0 0; font-size: 11px;">${os.manutentor || 'N/A'}</p>
+                    </div>
+                    <div style="text-align: center;">
+                        <p style="margin: 0; font-size: 12px; color: #999;">Assinatura do Operador</p>
+                        ${os.assinaturaOperador ? `<img src="${os.assinaturaOperador}" style="max-width: 150px; height: 60px; margin-top: 10px;">` : '<div style="border-top: 1px solid #000; width: 100%; margin-top: 20px;"></div>'}
+                        <p style="margin: 5px 0 0 0; font-size: 11px;">Responsável</p>
+                    </div>
+                </div>
+
+                <div style="margin-top: 40px; padding-top: 20px; border-top: 2px solid #ddd; text-align: center; font-size: 11px; color: #999;">
+                    <p style="margin: 0;">Relatório gerado em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}</p>
+                    <p style="margin: 5px 0 0 0;">EcoMaintain © 2026 - Sistema de Gestão de Manutenção</p>
+                </div>
+            `;
+
+            container.innerHTML = htmlRelatorio;
+            document.body.appendChild(container);
+
+            // Gerar PDF
+            const opt = {
+                margin: 10,
+                filename: `relatorio_os_${os.id}.pdf`,
+                image: { type: 'jpeg', quality: 0.98 },
+                html2canvas: { scale: 2 },
+                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+            };
+
+            await html2pdf().from(container).set(opt).save();
+            document.body.removeChild(container);
+            NOTIFICACOES.sucesso('Relatório gerado e baixado com sucesso!');
+
+        } catch(e) {
+            console.error(e);
+            NOTIFICACOES.erro('Erro ao gerar relatório: ' + e.message);
+        }
+    }
+};
+
+
+// ============================================
+// CRONOMETRAGEM INTELIGENTE DE TRABALHO EFETIVO
+// ============================================
+
+const CRONOMETRO = {
+    sessaoAtiva: null,
+    tempoInicio: null,
+    pausas: [],
+    intervaloVerificacao: null,
+
+    async iniciar() {
+        const user = DB.getCurrentUser();
+        if (!user) {
+            NOTIFICACOES.erro('Usuário não identificado!');
+            return;
+        }
+
+        // Buscar dados do turno do manutentor
+        const manutentor = await DB.obterManutentor(user.id);
+        if (!manutentor || !manutentor.turno_inicio || !manutentor.turno_fim) {
+            NOTIFICACOES.aviso('Configure seu turno de trabalho no cadastro!');
+            return;
+        }
+
+        const agora = new Date();
+        const horaAtual = agora.getHours() + ':' + String(agora.getMinutes()).padStart(2, '0');
+        
+        // Verificar se está dentro do horário de trabalho
+        if (horaAtual < manutentor.turno_inicio || horaAtual > manutentor.turno_fim) {
+            NOTIFICACOES.aviso('Você está fora do seu horário de trabalho!');
+            return;
+        }
+
+        // Iniciar cronômetro
+        this.sessaoAtiva = {
+            idManutentor: user.id,
+            nomeManutentor: user.nome,
+            dataInicio: agora.toISOString().split('T')[0],
+            horaInicio: agora,
+            turnoInicio: manutentor.turno_inicio,
+            turnoFim: manutentor.turno_fim,
+            almocolnicio: manutentor.almoco_inicio,
+            almocoFim: manutentor.almoco_fim,
+            pausas: []
+        };
+
+        this.tempoInicio = agora;
+        NOTIFICACOES.sucesso('⏱️ Cronômetro iniciado! Trabalho sendo registrado...');
+        
+        // Atualizar UI
+        this.atualizarUI();
+        
+        // Iniciar verificação automática de pausa de almoço
+        this.iniciarVerificacaoAutomatica();
+    },
+
+    async pausar() {
+        if (!this.sessaoAtiva) {
+            NOTIFICACOES.aviso('Nenhuma sessão ativa!');
+            return;
+        }
+
+        // Pedir motivo da pausa
+        const motivo = prompt('Qual é o motivo da pausa? (ex: Falta de peça, Espera de aprovação, etc)');
+        if (!motivo) {
+            NOTIFICACOES.aviso('Pausa cancelada!');
+            return;
+        }
+
+        const agora = new Date();
+        this.sessaoAtiva.pausas.push({
+            inicio: agora,
+            motivo: motivo,
+            duracao: 0
+        });
+
+        NOTIFICACOES.sucesso(`⏸️ Pausa registrada: ${motivo}`);
+        this.atualizarUI();
+    },
+
+    async retomar() {
+        if (!this.sessaoAtiva || this.sessaoAtiva.pausas.length === 0) {
+            NOTIFICACOES.aviso('Nenhuma pausa ativa!');
+            return;
+        }
+
+        const ultimaPausa = this.sessaoAtiva.pausas[this.sessaoAtiva.pausas.length - 1];
+        if (ultimaPausa.duracao === 0) {
+            const agora = new Date();
+            ultimaPausa.duracao = Math.floor((agora - ultimaPausa.inicio) / 1000 / 60); // em minutos
+        }
+
+        NOTIFICACOES.sucesso('▶️ Trabalho retomado!');
+        this.atualizarUI();
+    },
+
+    iniciarVerificacaoAutomatica() {
+        this.intervaloVerificacao = setInterval(() => {
+            if (!this.sessaoAtiva) {
+                clearInterval(this.intervaloVerificacao);
+                return;
+            }
+
+            const agora = new Date();
+            const horaAtual = agora.getHours() + ':' + String(agora.getMinutes()).padStart(2, '0');
+
+            // Verificar se é hora de almoço
+            if (this.sessaoAtiva.almocolnicio && this.sessaoAtiva.almocoFim) {
+                if (horaAtual >= this.sessaoAtiva.almocolnicio && horaAtual < this.sessaoAtiva.almocoFim) {
+                    // Se não está em pausa de almoço, pausar automaticamente
+                    const emAlmoco = this.sessaoAtiva.pausas.some(p => p.motivo === 'Almoço' && p.duracao === 0);
+                    if (!emAlmoco) {
+                        this.sessaoAtiva.pausas.push({
+                            inicio: agora,
+                            motivo: 'Almoço',
+                            duracao: 0
+                        });
+                        NOTIFICACOES.info('⏸️ Pausa de almoço iniciada automaticamente!');
+                    }
+                }
+            }
+
+            // Verificar se passou do horário de saída
+            if (horaAtual >= this.sessaoAtiva.turnoFim) {
+                this.finalizarSessao();
+            }
+
+            this.atualizarUI();
+        }, 60000); // Verificar a cada minuto
+    },
+
+    async finalizarSessao() {
+        if (!this.sessaoAtiva) {
+            NOTIFICACOES.aviso('Nenhuma sessão ativa!');
+            return;
+        }
+
+        clearInterval(this.intervaloVerificacao);
+
+        const agora = new Date();
+        this.sessaoAtiva.horaFim = agora;
+
+        // Calcular tempo total trabalhado
+        const totalMinutos = Math.floor((agora - this.tempoInicio) / 1000 / 60);
+        const minutosPausa = this.sessaoAtiva.pausas.reduce((acc, p) => acc + (p.duracao || 0), 0);
+        const minutosTrabalhados = totalMinutos - minutosPausa;
+
+        // Salvar no banco de dados
+        try {
+            await fetch(`${API_BASE}/tempo-trabalho`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    criarSessao: true,
+                    idManutentor: this.sessaoAtiva.idManutentor,
+                    nomeManutentor: this.sessaoAtiva.nomeManutentor,
+                    dataSessao: this.sessaoAtiva.dataInicio,
+                    horaInicio: this.sessaoAtiva.horaInicio,
+                    horaFim: agora,
+                    pausas: this.sessaoAtiva.pausas,
+                    totalMinutosTrabalhados: minutosTrabalhados,
+                    totalMinutosPausa: minutosPausa
+                })
+            });
+
+            NOTIFICACOES.sucesso(`✅ Sessão finalizada! Você trabalhou ${Math.floor(minutosTrabalhados / 60)}h ${minutosTrabalhados % 60}m`);
+            this.sessaoAtiva = null;
+            this.tempoInicio = null;
+            this.atualizarUI();
+        } catch(e) {
+            NOTIFICACOES.erro('Erro ao salvar sessão: ' + e.message);
+        }
+    },
+
+    atualizarUI() {
+        const statusElement = document.getElementById('statusCronometro');
+        if (!statusElement) return;
+
+        if (!this.sessaoAtiva) {
+            statusElement.innerHTML = '<p style="color: #999;">Nenhuma sessão ativa</p>';
+            return;
+        }
+
+        const agora = new Date();
+        const totalMinutos = Math.floor((agora - this.tempoInicio) / 1000 / 60);
+        const minutosPausa = this.sessaoAtiva.pausas.reduce((acc, p) => acc + (p.duracao || 0), 0);
+        const minutosTrabalhados = totalMinutos - minutosPausa;
+
+        const horas = Math.floor(minutosTrabalhados / 60);
+        const minutos = minutosTrabalhados % 60;
+
+        let pausasHTML = '';
+        if (this.sessaoAtiva.pausas.length > 0) {
+            pausasHTML = '<strong>Pausas registradas:</strong><ul>';
+            this.sessaoAtiva.pausas.forEach(p => {
+                pausasHTML += `<li>${p.motivo}: ${p.duracao || 'em andamento'} min</li>`;
+            });
+            pausasHTML += '</ul>';
+        }
+
+        statusElement.innerHTML = `
+            <div style="background: #e8f5e9; padding: 15px; border-radius: 5px; border-left: 5px solid #4caf50;">
+                <p style="margin: 0; font-size: 18px; color: #2e7d32;"><strong>⏱️ Tempo Trabalhado: ${horas}h ${minutos}m</strong></p>
+                <p style="margin: 5px 0 0 0; color: #666;">Total de pausas: ${minutosPausa} min</p>
+                ${pausasHTML}
+            </div>
+        `;
+    }
+};
+
+
+// ============================================
+// RELATÓRIO DE PRODUTIVIDADE (PPR)
+// ============================================
+
+const RELATORIO_PRODUTIVIDADE = {
+    async gerar() {
+        const dataInicio = document.getElementById('filtroDataInicio')?.value;
+        const dataFim = document.getElementById('filtroDataFim')?.value;
+        const idManutentor = document.getElementById('filtroManutentor')?.value;
+
+        if (!dataInicio || !dataFim || !idManutentor) {
+            NOTIFICACOES.erro('Preencha todos os filtros!');
+            return;
+        }
+
+        try {
+            // Buscar dados do manutentor
+            const manutentores = await DB.obterManutentores();
+            const manutentor = manutentores.find(m => m.id === idManutentor);
+
+            if (!manutentor) {
+                NOTIFICACOES.erro('Manutentor não encontrado!');
+                return;
+            }
+
+            // Buscar sessões de trabalho
+            const response = await fetch(`${API_BASE}/tempo-trabalho?sessoes=true&idManutentor=${idManutentor}&dataInicio=${dataInicio}&dataFim=${dataFim}`);
+            const sessoes = await response.json();
+
+            // Calcular resumo
+            let totalMinutosTrabalhados = 0;
+            let totalMinutosPausa = 0;
+            const diasTrabalhados = {};
+
+            sessoes.forEach(sessao => {
+                totalMinutosTrabalhados += sessao.total_minutos_trabalhados || 0;
+                totalMinutosPausa += sessao.total_minutos_pausa || 0;
+
+                if (!diasTrabalhados[sessao.data_sessao]) {
+                    diasTrabalhados[sessao.data_sessao] = {
+                        minutos: 0,
+                        pausas: 0,
+                        detalhes: []
+                    };
+                }
+
+                diasTrabalhados[sessao.data_sessao].minutos += sessao.total_minutos_trabalhados || 0;
+                diasTrabalhados[sessao.data_sessao].pausas += sessao.total_minutos_pausa || 0;
+                diasTrabalhados[sessao.data_sessao].detalhes.push(sessao);
+            });
+
+            // Gerar PDF
+            this.gerarPDF(manutentor, dataInicio, dataFim, totalMinutosTrabalhados, totalMinutosPausa, diasTrabalhados);
+
+        } catch(e) {
+            console.error(e);
+            NOTIFICACOES.erro('Erro ao gerar relatório: ' + e.message);
+        }
+    },
+
+    gerarPDF(manutentor, dataInicio, dataFim, totalMinutosTrabalhados, totalMinutosPausa, diasTrabalhados) {
+        const container = document.createElement('div');
+        container.id = `relatorio-produtividade-${Date.now()}`;
+        container.style.padding = '40px';
+        container.style.fontFamily = 'Arial, sans-serif';
+        container.style.backgroundColor = 'white';
+
+        const totalHoras = Math.floor(totalMinutosTrabalhados / 60);
+        const totalMinutos = totalMinutosTrabalhados % 60;
+        const pausaHoras = Math.floor(totalMinutosPausa / 60);
+        const pausaMinutos = totalMinutosPausa % 60;
+
+        let tabelaDias = '';
+        Object.keys(diasTrabalhados).sort().forEach(data => {
+            const dia = diasTrabalhados[data];
+            const horas = Math.floor(dia.minutos / 60);
+            const minutos = dia.minutos % 60;
+            tabelaDias += `
+                <tr>
+                    <td style="border: 1px solid #ddd; padding: 12px;">${new Date(data).toLocaleDateString('pt-BR')}</td>
+                    <td style="border: 1px solid #ddd; padding: 12px; text-align: center;">${horas}h ${minutos}m</td>
+                    <td style="border: 1px solid #ddd; padding: 12px; text-align: center;">${dia.pausas} min</td>
+                </tr>
+            `;
+        });
+
+        const htmlRelatorio = `
+            <div style="text-align: center; border-bottom: 3px solid #1976d2; padding-bottom: 20px; margin-bottom: 30px;">
+                <h1 style="color: #1976d2; margin: 0; font-size: 24px;">RELATÓRIO DE PRODUTIVIDADE (PPR)</h1>
+                <p style="color: #7f8c8d; margin: 5px 0 0 0; font-size: 12px;">EcoMaintain - Sistema de Gestão de Manutenção</p>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px;">
+                <div>
+                    <p style="margin: 0 0 10px 0;"><strong style="color: #1976d2;">Manutentor:</strong> ${manutentor.nome}</p>
+                    <p style="margin: 0 0 10px 0;"><strong style="color: #1976d2;">E-mail:</strong> ${manutentor.email}</p>
+                    <p style="margin: 0 0 10px 0;"><strong style="color: #1976d2;">Turno:</strong> ${manutentor.turno_inicio || '--'} às ${manutentor.turno_fim || '--'}</p>
+                </div>
+                <div>
+                    <p style="margin: 0 0 10px 0;"><strong style="color: #1976d2;">Período:</strong> ${new Date(dataInicio).toLocaleDateString('pt-BR')} a ${new Date(dataFim).toLocaleDateString('pt-BR')}</p>
+                    <p style="margin: 0 0 10px 0;"><strong style="color: #1976d2;">Dias Trabalhados:</strong> ${Object.keys(diasTrabalhados).length}</p>
+                </div>
+            </div>
+
+            <h3 style="background: #f5f5f5; padding: 12px; border-left: 5px solid #1976d2; margin: 20px 0 15px 0; color: #1976d2;">Resumo Total</h3>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 30px;">
+                <div style="background: #e3f2fd; padding: 20px; border-radius: 5px; text-align: center;">
+                    <p style="margin: 0; font-size: 12px; color: #666;">HORAS TRABALHADAS</p>
+                    <p style="margin: 10px 0 0 0; font-size: 28px; font-weight: bold; color: #1976d2;">${totalHoras}h ${totalMinutos}m</p>
+                </div>
+                <div style="background: #fff3e0; padding: 20px; border-radius: 5px; text-align: center;">
+                    <p style="margin: 0; font-size: 12px; color: #666;">TEMPO EM PAUSA</p>
+                    <p style="margin: 10px 0 0 0; font-size: 28px; font-weight: bold; color: #f57c00;">${pausaHoras}h ${pausaMinutos}m</p>
+                </div>
+                <div style="background: #f3e5f5; padding: 20px; border-radius: 5px; text-align: center;">
+                    <p style="margin: 0; font-size: 12px; color: #666;">MÉDIA DIÁRIA</p>
+                    <p style="margin: 10px 0 0 0; font-size: 28px; font-weight: bold; color: #7b1fa2;">${Math.floor(totalMinutosTrabalhados / (Object.keys(diasTrabalhados).length || 1) / 60)}h</p>
+                </div>
+            </div>
+
+            <h3 style="background: #f5f5f5; padding: 12px; border-left: 5px solid #1976d2; margin: 20px 0 15px 0; color: #1976d2;">Detalhamento por Dia</h3>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+                <thead>
+                    <tr style="background: #1976d2; color: white;">
+                        <th style="border: 1px solid #ddd; padding: 12px; text-align: left;">Data</th>
+                        <th style="border: 1px solid #ddd; padding: 12px; text-align: center;">Horas Trabalhadas</th>
+                        <th style="border: 1px solid #ddd; padding: 12px; text-align: center;">Tempo em Pausa</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${tabelaDias}
+                </tbody>
+            </table>
+
+            <div style="margin-top: 40px; padding-top: 20px; border-top: 2px solid #ddd; text-align: center; font-size: 11px; color: #999;">
+                <p style="margin: 0;">Relatório gerado em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}</p>
+                <p style="margin: 5px 0 0 0;">EcoMaintain © 2026 - Sistema de Gestão de Manutenção</p>
+            </div>
+        `;
+
+        container.innerHTML = htmlRelatorio;
+        document.body.appendChild(container);
+
+        // Gerar PDF
+        const opt = {
+            margin: 10,
+            filename: `relatorio_produtividade_${manutentor.nome}_${new Date().toISOString().split('T')[0]}.pdf`,
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: { scale: 2 },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        };
+
+        html2pdf().from(container).set(opt).save();
+        document.body.removeChild(container);
+        NOTIFICACOES.sucesso('Relatório de produtividade gerado e baixado com sucesso!');
+    }
+};
+
+
+// ============================================
+// RELATÓRIO DE CUSTOS (ESTOQUE)
+// ============================================
+
+const RELATORIO_CUSTOS = {
+    async gerar() {
+        const dataInicio = document.getElementById('filtroDataInicioCustos')?.value;
+        const dataFim = document.getElementById('filtroDataFimCustos')?.value;
+
+        if (!dataInicio || !dataFim) {
+            NOTIFICACOES.erro('Preencha as datas de início e fim!');
+            return;
+        }
+
+        try {
+            // Buscar todas as OS finalizadas no período
+            const todasAsOS = await DB.obterOrdenServico();
+            const osFiltradasPeriodo = todasAsOS.filter(os => {
+                const dataOS = new Date(os.dataCriacao);
+                return dataOS >= new Date(dataInicio) && dataOS <= new Date(dataFim);
+            });
+
+            // Buscar dados de peças
+            const todasAsPecas = await DB.obterPecas();
+
+            // Calcular custos
+            let totalCustoPeriodo = 0;
+            const custoPorPeca = {};
+            const custoPorMes = {};
+
+            osFiltradasPeriodo.forEach(os => {
+                if (os.pecas && os.pecas.length > 0) {
+                    os.pecas.forEach(pecaOS => {
+                        const pecaInfo = todasAsPecas.find(p => p.id === pecaOS.pecaId);
+                        if (pecaInfo) {
+                            const custoPeca = pecaInfo.valor * pecaOS.quantidade;
+                            totalCustoPeriodo += custoPeca;
+
+                            // Agrupar por peça
+                            if (!custoPorPeca[pecaInfo.nome]) {
+                                custoPorPeca[pecaInfo.nome] = { quantidade: 0, valor: 0 };
+                            }
+                            custoPorPeca[pecaInfo.nome].quantidade += pecaOS.quantidade;
+                            custoPorPeca[pecaInfo.nome].valor += custoPeca;
+
+                            // Agrupar por mês
+                            const mes = new Date(os.dataCriacao).toLocaleDateString('pt-BR', { year: 'numeric', month: '2-digit' });
+                            if (!custoPorMes[mes]) {
+                                custoPorMes[mes] = 0;
+                            }
+                            custoPorMes[mes] += custoPeca;
+                        }
+                    });
+                }
+            });
+
+            this.gerarPDF(dataInicio, dataFim, totalCustoPeriodo, custoPorPeca, custoPorMes);
+
+        } catch(e) {
+            console.error(e);
+            NOTIFICACOES.erro('Erro ao gerar relatório: ' + e.message);
+        }
+    },
+
+    gerarPDF(dataInicio, dataFim, totalCustoPeriodo, custoPorPeca, custoPorMes) {
+        const container = document.createElement('div');
+        container.id = `relatorio-custos-${Date.now()}`;
+        container.style.padding = '40px';
+        container.style.fontFamily = 'Arial, sans-serif';
+        container.style.backgroundColor = 'white';
+
+        let tabelaPecas = '';
+        Object.keys(custoPorPeca).sort().forEach(nomePeca => {
+            const peca = custoPorPeca[nomePeca];
+            tabelaPecas += `
+                <tr>
+                    <td style="border: 1px solid #ddd; padding: 12px;">${nomePeca}</td>
+                    <td style="border: 1px solid #ddd; padding: 12px; text-align: center;">${peca.quantidade}</td>
+                    <td style="border: 1px solid #ddd; padding: 12px; text-align: right;">R$ ${peca.valor.toFixed(2)}</td>
+                </tr>
+            `;
+        });
+
+        let tabelaMeses = '';
+        Object.keys(custoPorMes).sort().forEach(mes => {
+            tabelaMeses += `
+                <tr>
+                    <td style="border: 1px solid #ddd; padding: 12px;">${mes}</td>
+                    <td style="border: 1px solid #ddd; padding: 12px; text-align: right;">R$ ${custoPorMes[mes].toFixed(2)}</td>
+                </tr>
+            `;
+        });
+
+        const htmlRelatorio = `
+            <div style="text-align: center; border-bottom: 3px solid #d32f2f; padding-bottom: 20px; margin-bottom: 30px;">
+                <h1 style="color: #d32f2f; margin: 0; font-size: 24px;">RELATÓRIO DE CUSTOS DE ESTOQUE</h1>
+                <p style="color: #7f8c8d; margin: 5px 0 0 0; font-size: 12px;">EcoMaintain - Sistema de Gestão de Manutenção</p>
+            </div>
+
+            <div style="margin-bottom: 30px;">
+                <p style="margin: 0 0 10px 0;"><strong style="color: #d32f2f;">Período:</strong> ${new Date(dataInicio).toLocaleDateString('pt-BR')} a ${new Date(dataFim).toLocaleDateString('pt-BR')}</p>
+            </div>
+
+            <h3 style="background: #f5f5f5; padding: 12px; border-left: 5px solid #d32f2f; margin: 20px 0 15px 0; color: #d32f2f;">Resumo Total</h3>
+            <div style="background: #ffebee; padding: 20px; border-radius: 5px; text-align: center; margin-bottom: 30px;">
+                <p style="margin: 0; font-size: 12px; color: #666;">CUSTO TOTAL DO PERÍODO</p>
+                <p style="margin: 10px 0 0 0; font-size: 32px; font-weight: bold; color: #d32f2f;">R$ ${totalCustoPeriodo.toFixed(2)}</p>
+            </div>
+
+            <h3 style="background: #f5f5f5; padding: 12px; border-left: 5px solid #d32f2f; margin: 20px 0 15px 0; color: #d32f2f;">Custos por Mês</h3>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
+                <thead>
+                    <tr style="background: #d32f2f; color: white;">
+                        <th style="border: 1px solid #ddd; padding: 12px; text-align: left;">Mês</th>
+                        <th style="border: 1px solid #ddd; padding: 12px; text-align: right;">Custo</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${tabelaMeses}
+                </tbody>
+            </table>
+
+            <h3 style="background: #f5f5f5; padding: 12px; border-left: 5px solid #d32f2f; margin: 20px 0 15px 0; color: #d32f2f;">Custos por Peça</h3>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+                <thead>
+                    <tr style="background: #d32f2f; color: white;">
+                        <th style="border: 1px solid #ddd; padding: 12px; text-align: left;">Peça</th>
+                        <th style="border: 1px solid #ddd; padding: 12px; text-align: center; width: 120px;">Quantidade</th>
+                        <th style="border: 1px solid #ddd; padding: 12px; text-align: right; width: 150px;">Custo Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${tabelaPecas}
+                </tbody>
+            </table>
+
+            <div style="margin-top: 40px; padding-top: 20px; border-top: 2px solid #ddd; text-align: center; font-size: 11px; color: #999;">
+                <p style="margin: 0;">Relatório gerado em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}</p>
+                <p style="margin: 5px 0 0 0;">EcoMaintain © 2026 - Sistema de Gestão de Manutenção</p>
+            </div>
+        `;
+
+        container.innerHTML = htmlRelatorio;
+        document.body.appendChild(container);
+
+        const opt = {
+            margin: 10,
+            filename: `relatorio_custos_${new Date().toISOString().split('T')[0]}.pdf`,
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: { scale: 2 },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        };
+
+        html2pdf().from(container).set(opt).save();
+        document.body.removeChild(container);
+        NOTIFICACOES.sucesso('Relatório de custos gerado e baixado com sucesso!');
+    }
+};
+
+// ============================================
+// ANÁLISE DE FALHAS
+// ============================================
+
+const ANALISE_FALHAS = {
+    async gerar() {
+        const dataInicio = document.getElementById('filtroDataInicioFalhas')?.value;
+        const dataFim = document.getElementById('filtroDataFimFalhas')?.value;
+
+        if (!dataInicio || !dataFim) {
+            NOTIFICACOES.erro('Preencha as datas de início e fim!');
+            return;
+        }
+
+        try {
+            // Buscar todas as OS no período
+            const todasAsOS = await DB.obterOrdenServico();
+            const osFiltradasPeriodo = todasAsOS.filter(os => {
+                const dataOS = new Date(os.dataCriacao);
+                return dataOS >= new Date(dataInicio) && dataOS <= new Date(dataFim);
+            });
+
+            // Analisar falhas
+            const falhasPorMaquina = {};
+            const falhasRecorrentes = {};
+            const periodosCriticos = {};
+
+            osFiltradasPeriodo.forEach(os => {
+                // Contar falhas por máquina
+                if (!falhasPorMaquina[os.maquinaId]) {
+                    falhasPorMaquina[os.maquinaId] = { quantidade: 0, detalhes: [] };
+                }
+                falhasPorMaquina[os.maquinaId].quantidade++;
+                falhasPorMaquina[os.maquinaId].detalhes.push({
+                    data: os.dataCriacao,
+                    descricao: os.descricao,
+                    status: os.status
+                });
+
+                // Identificar falhas recorrentes (mesmo problema)
+                const palavrasChave = os.descricao.toLowerCase().split(' ').slice(0, 3).join(' ');
+                if (!falhasRecorrentes[palavrasChave]) {
+                    falhasRecorrentes[palavrasChave] = 0;
+                }
+                falhasRecorrentes[palavrasChave]++;
+
+                // Períodos críticos (por semana)
+                const semana = new Date(os.dataCriacao).toLocaleDateString('pt-BR', { year: 'numeric', month: '2-digit', week: 'numeric' });
+                if (!periodosCriticos[semana]) {
+                    periodosCriticos[semana] = 0;
+                }
+                periodosCriticos[semana]++;
+            });
+
+            this.gerarPDF(dataInicio, dataFim, falhasPorMaquina, falhasRecorrentes, periodosCriticos);
+
+        } catch(e) {
+            console.error(e);
+            NOTIFICACOES.erro('Erro ao gerar análise: ' + e.message);
+        }
+    },
+
+    gerarPDF(dataInicio, dataFim, falhasPorMaquina, falhasRecorrentes, periodosCriticos) {
+        const container = document.createElement('div');
+        container.id = `analise-falhas-${Date.now()}`;
+        container.style.padding = '40px';
+        container.style.fontFamily = 'Arial, sans-serif';
+        container.style.backgroundColor = 'white';
+
+        // Máquinas com mais falhas
+        const maquinasOrdenadas = Object.entries(falhasPorMaquina)
+            .sort((a, b) => b[1].quantidade - a[1].quantidade)
+            .slice(0, 10);
+
+        let tabelaMaquinas = '';
+        maquinasOrdenadas.forEach(([maquina, dados]) => {
+            tabelaMaquinas += `
+                <tr>
+                    <td style="border: 1px solid #ddd; padding: 12px;">${maquina}</td>
+                    <td style="border: 1px solid #ddd; padding: 12px; text-align: center;"><strong>${dados.quantidade}</strong></td>
+                    <td style="border: 1px solid #ddd; padding: 12px; font-size: 12px;">
+                        ${dados.detalhes.map(d => `${new Date(d.data).toLocaleDateString('pt-BR')}: ${d.descricao.substring(0, 40)}...`).join('<br>')}
+                    </td>
+                </tr>
+            `;
+        });
+
+        // Falhas recorrentes
+        const falhasOrdenadas = Object.entries(falhasRecorrentes)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 10);
+
+        let tabelaFalhas = '';
+        falhasOrdenadas.forEach(([tipo, quantidade]) => {
+            tabelaFalhas += `
+                <tr>
+                    <td style="border: 1px solid #ddd; padding: 12px;">${tipo}</td>
+                    <td style="border: 1px solid #ddd; padding: 12px; text-align: center;"><strong>${quantidade}</strong></td>
+                </tr>
+            `;
+        });
+
+        const htmlRelatorio = `
+            <div style="text-align: center; border-bottom: 3px solid #f57c00; padding-bottom: 20px; margin-bottom: 30px;">
+                <h1 style="color: #f57c00; margin: 0; font-size: 24px;">ANÁLISE DE FALHAS</h1>
+                <p style="color: #7f8c8d; margin: 5px 0 0 0; font-size: 12px;">EcoMaintain - Sistema de Gestão de Manutenção</p>
+            </div>
+
+            <div style="margin-bottom: 30px;">
+                <p style="margin: 0 0 10px 0;"><strong style="color: #f57c00;">Período:</strong> ${new Date(dataInicio).toLocaleDateString('pt-BR')} a ${new Date(dataFim).toLocaleDateString('pt-BR')}</p>
+                <p style="margin: 0;"><strong style="color: #f57c00;">Total de Falhas:</strong> ${Object.values(falhasPorMaquina).reduce((acc, m) => acc + m.quantidade, 0)}</p>
+            </div>
+
+            <h3 style="background: #f5f5f5; padding: 12px; border-left: 5px solid #f57c00; margin: 20px 0 15px 0; color: #f57c00;">Máquinas com Mais Falhas</h3>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
+                <thead>
+                    <tr style="background: #f57c00; color: white;">
+                        <th style="border: 1px solid #ddd; padding: 12px; text-align: left;">Máquina</th>
+                        <th style="border: 1px solid #ddd; padding: 12px; text-align: center; width: 100px;">Falhas</th>
+                        <th style="border: 1px solid #ddd; padding: 12px; text-align: left;">Últimas Ocorrências</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${tabelaMaquinas}
+                </tbody>
+            </table>
+
+            <h3 style="background: #f5f5f5; padding: 12px; border-left: 5px solid #f57c00; margin: 20px 0 15px 0; color: #f57c00;">Falhas Recorrentes</h3>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+                <thead>
+                    <tr style="background: #f57c00; color: white;">
+                        <th style="border: 1px solid #ddd; padding: 12px; text-align: left;">Tipo de Falha</th>
+                        <th style="border: 1px solid #ddd; padding: 12px; text-align: center; width: 100px;">Ocorrências</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${tabelaFalhas}
+                </tbody>
+            </table>
+
+            <div style="margin-top: 40px; padding-top: 20px; border-top: 2px solid #ddd; text-align: center; font-size: 11px; color: #999;">
+                <p style="margin: 0;">Relatório gerado em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}</p>
+                <p style="margin: 5px 0 0 0;">EcoMaintain © 2026 - Sistema de Gestão de Manutenção</p>
+            </div>
+        `;
+
+        container.innerHTML = htmlRelatorio;
+        document.body.appendChild(container);
+
+        const opt = {
+            margin: 10,
+            filename: `analise_falhas_${new Date().toISOString().split('T')[0]}.pdf`,
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: { scale: 2 },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        };
+
+        html2pdf().from(container).set(opt).save();
+        document.body.removeChild(container);
+        NOTIFICACOES.sucesso('Análise de falhas gerada e baixada com sucesso!');
+    }
+};
+
+
+// ============================================
+// RELATÓRIO DE O.S. AVANÇADO (CICLO DE VIDA COMPLETO)
+// ============================================
+
+const RELATORIO_OS_AVANCADO = {
+    async gerar() {
+        const dataInicio = document.getElementById('filtroDataInicioOS')?.value;
+        const dataFim = document.getElementById('filtroDataFimOS')?.value;
+
+        if (!dataInicio || !dataFim) {
+            NOTIFICACOES.erro('Preencha as datas de início e fim!');
+            return;
+        }
+
+        try {
+            // Buscar todas as OS no período
+            const todasAsOS = await DB.obterOrdenServico();
+            const osFiltradasPeriodo = todasAsOS.filter(os => {
+                const dataOS = new Date(os.dataCriacao);
+                return dataOS >= new Date(dataInicio) && dataOS <= new Date(dataFim);
+            });
+
+            // Agrupar por mês
+            const osPorMes = {};
+            osFiltradasPeriodo.forEach(os => {
+                const mes = new Date(os.dataCriacao).toLocaleDateString('pt-BR', { year: 'numeric', month: '2-digit' });
+                if (!osPorMes[mes]) {
+                    osPorMes[mes] = [];
+                }
+                osPorMes[mes].push(os);
+            });
+
+            // Gerar lista de OS com opção de expandir
+            this.gerarListaOS(dataInicio, dataFim, osPorMes, osFiltradasPeriodo.length);
+
+        } catch(e) {
+            console.error(e);
+            NOTIFICACOES.erro('Erro ao gerar relatório: ' + e.message);
+        }
+    },
+
+    gerarListaOS(dataInicio, dataFim, osPorMes, totalOS) {
+        const container = document.createElement('div');
+        container.id = `relatorio-os-lista-${Date.now()}`;
+        container.style.padding = '20px';
+        container.style.fontFamily = 'Arial, sans-serif';
+        container.style.backgroundColor = '#f5f5f5';
+
+        let htmlLista = `
+            <div style="background: white; padding: 20px; border-radius: 5px; margin-bottom: 20px;">
+                <h2 style="color: #1976d2; margin-top: 0;">Relatório de Ordens de Serviço</h2>
+                <p><strong>Período:</strong> ${new Date(dataInicio).toLocaleDateString('pt-BR')} a ${new Date(dataFim).toLocaleDateString('pt-BR')}</p>
+                <p><strong>Total de O.S.:</strong> ${totalOS}</p>
+            </div>
+        `;
+
+        Object.keys(osPorMes).sort().forEach(mes => {
+            const osDoMes = osPorMes[mes];
+            htmlLista += `
+                <div style="background: white; padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 5px solid #1976d2;">
+                    <h3 style="margin-top: 0; color: #1976d2;">Mês: ${mes} (${osDoMes.length} O.S.)</h3>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <thead>
+                            <tr style="background: #e3f2fd;">
+                                <th style="border: 1px solid #ddd; padding: 10px; text-align: left;">ID</th>
+                                <th style="border: 1px solid #ddd; padding: 10px; text-align: left;">Máquina</th>
+                                <th style="border: 1px solid #ddd; padding: 10px; text-align: left;">Status</th>
+                                <th style="border: 1px solid #ddd; padding: 10px; text-align: center;">Ação</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${osDoMes.map(os => `
+                                <tr>
+                                    <td style="border: 1px solid #ddd; padding: 10px;">${os.id}</td>
+                                    <td style="border: 1px solid #ddd; padding: 10px;">${os.maquinaId}</td>
+                                    <td style="border: 1px solid #ddd; padding: 10px;">
+                                        <span style="background: ${os.status === 'finalizada' ? '#d4edda' : os.status === 'pendente' ? '#fff3cd' : '#e2e3e5'}; padding: 5px 10px; border-radius: 3px;">
+                                            ${os.status.toUpperCase()}
+                                        </span>
+                                    </td>
+                                    <td style="border: 1px solid #ddd; padding: 10px; text-align: center;">
+                                        <button class="btn btn-sm btn-primary" onclick="RELATORIO_OS_AVANCADO.expandirDetalhes('${os.id}')" style="padding: 5px 10px; font-size: 12px;">Ver Detalhes</button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        });
+
+        container.innerHTML = htmlLista;
+        document.body.appendChild(container);
+        NOTIFICACOES.sucesso('Relatório de O.S. gerado! Clique em "Ver Detalhes" para análise completa.');
+    },
+
+    async expandirDetalhes(osId) {
+        try {
+            const os = await DB.obterOSPorId(osId);
+            if (!os) {
+                NOTIFICACOES.erro('O.S. não encontrada!');
+                return;
+            }
+
+            // Calcular tempos
+            const dataCriacao = new Date(os.dataCriacao);
+            const dataFechamento = os.dataFechamento ? new Date(os.dataFechamento) : new Date();
+            const tempoTotalMs = dataFechamento - dataCriacao;
+            const tempoTotalHoras = (tempoTotalMs / (1000 * 60 * 60)).toFixed(2);
+
+            // Calcular tempo em pendência
+            let tempoPendenciaHoras = 0;
+            if (os.dataPendencia && os.dataLiberacao) {
+                const tempoPendenciaMs = new Date(os.dataLiberacao) - new Date(os.dataPendencia);
+                tempoPendenciaHoras = (tempoPendenciaMs / (1000 * 60 * 60)).toFixed(2);
+            }
+
+            // Buscar tempo de trabalho efetivo (do cronômetro)
+            let tempoTrabalhoEfetivo = 0;
+            try {
+                const response = await fetch(`${API_BASE}/tempo-trabalho?idManutentor=${os.id_manutentor}&dataInicio=${os.dataCriacao.split('T')[0]}&dataFim=${os.dataFechamento ? os.dataFechamento.split('T')[0] : new Date().toISOString().split('T')[0]}`);
+                const registros = await response.json();
+                
+                // Somar tempo de trabalho dos registros relacionados a esta OS
+                registros.forEach(reg => {
+                    if (reg.tipo_registro === 'trabalho') {
+                        tempoTrabalhoEfetivo += reg.duracao_minutos || 0;
+                    }
+                });
+            } catch(e) {
+                console.log('Não foi possível buscar tempo de trabalho efetivo');
+            }
+
+            const tempoTrabalhoHoras = Math.floor(tempoTrabalhoEfetivo / 60);
+            const tempoTrabalhoMinutos = tempoTrabalhoEfetivo % 60;
+
+            // Tempo após liberação de pendência
+            let tempoAposLiberacao = 0;
+            if (os.dataLiberacao && os.dataFechamento) {
+                const tempoAposMs = new Date(os.dataFechamento) - new Date(os.dataLiberacao);
+                tempoAposLiberacao = (tempoAposMs / (1000 * 60 * 60)).toFixed(2);
+            }
+
+            this.gerarPDFDetalhes(os, tempoTotalHoras, tempoPendenciaHoras, tempoTrabalhoHoras, tempoTrabalhoMinutos, tempoAposLiberacao);
+
+        } catch(e) {
+            console.error(e);
+            NOTIFICACOES.erro('Erro ao expandir detalhes: ' + e.message);
+        }
+    },
+
+    gerarPDFDetalhes(os, tempoTotalHoras, tempoPendenciaHoras, tempoTrabalhoHoras, tempoTrabalhoMinutos, tempoAposLiberacao) {
+        const container = document.createElement('div');
+        container.id = `relatorio-os-detalhes-${Date.now()}`;
+        container.style.padding = '40px';
+        container.style.fontFamily = 'Arial, sans-serif';
+        container.style.backgroundColor = 'white';
+
+        const htmlRelatorio = `
+            <div style="text-align: center; border-bottom: 3px solid #1976d2; padding-bottom: 20px; margin-bottom: 30px;">
+                <h1 style="color: #1976d2; margin: 0; font-size: 24px;">RELATÓRIO DETALHADO DE ORDEM DE SERVIÇO</h1>
+                <p style="color: #7f8c8d; margin: 5px 0 0 0; font-size: 12px;">Análise Completa do Ciclo de Vida</p>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px;">
+                <div>
+                    <p style="margin: 0 0 10px 0;"><strong style="color: #1976d2;">ID da O.S.:</strong> ${os.id}</p>
+                    <p style="margin: 0 0 10px 0;"><strong style="color: #1976d2;">Máquina:</strong> ${os.maquinaId}</p>
+                    <p style="margin: 0 0 10px 0;"><strong style="color: #1976d2;">Manutentor:</strong> ${os.manutentor || 'N/A'}</p>
+                    <p style="margin: 0 0 10px 0;"><strong style="color: #1976d2;">Status:</strong> <span style="background: ${os.status === 'finalizada' ? '#d4edda' : os.status === 'pendente' ? '#fff3cd' : '#e2e3e5'}; padding: 4px 12px; border-radius: 4px;">${os.status.toUpperCase()}</span></p>
+                </div>
+                <div>
+                    <p style="margin: 0 0 10px 0;"><strong style="color: #1976d2;">Data Criação:</strong> ${new Date(os.dataCriacao).toLocaleDateString('pt-BR')} às ${new Date(os.dataCriacao).toLocaleTimeString('pt-BR')}</p>
+                    <p style="margin: 0 0 10px 0;"><strong style="color: #1976d2;">Data Finalização:</strong> ${os.dataFechamento ? new Date(os.dataFechamento).toLocaleDateString('pt-BR') + ' às ' + new Date(os.dataFechamento).toLocaleTimeString('pt-BR') : 'Em andamento'}</p>
+                </div>
+            </div>
+
+            <h3 style="background: #f8f9fa; padding: 12px; border-left: 5px solid #1976d2; margin: 20px 0 15px 0; color: #1976d2;">Análise de Tempos</h3>
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 30px;">
+                <div style="background: #e3f2fd; padding: 20px; border-radius: 5px; text-align: center;">
+                    <p style="margin: 0; font-size: 12px; color: #666;">TEMPO TOTAL</p>
+                    <p style="margin: 10px 0 0 0; font-size: 24px; font-weight: bold; color: #1976d2;">${tempoTotalHoras}h</p>
+                </div>
+                <div style="background: #fff3e0; padding: 20px; border-radius: 5px; text-align: center;">
+                    <p style="margin: 0; font-size: 12px; color: #666;">TEMPO EM PENDÊNCIA</p>
+                    <p style="margin: 10px 0 0 0; font-size: 24px; font-weight: bold; color: #f57c00;">${tempoPendenciaHoras}h</p>
+                </div>
+                <div style="background: #e8f5e9; padding: 20px; border-radius: 5px; text-align: center;">
+                    <p style="margin: 0; font-size: 12px; color: #666;">TRABALHO EFETIVO</p>
+                    <p style="margin: 10px 0 0 0; font-size: 24px; font-weight: bold; color: #388e3c;">${tempoTrabalhoHoras}h ${tempoTrabalhoMinutos}m</p>
+                </div>
+                <div style="background: #f3e5f5; padding: 20px; border-radius: 5px; text-align: center;">
+                    <p style="margin: 0; font-size: 12px; color: #666;">TEMPO PÓS-LIBERAÇÃO</p>
+                    <p style="margin: 10px 0 0 0; font-size: 24px; font-weight: bold; color: #7b1fa2;">${tempoAposLiberacao}h</p>
+                </div>
+            </div>
+
+            <h3 style="background: #f8f9fa; padding: 12px; border-left: 5px solid #1976d2; margin: 20px 0 15px 0; color: #1976d2;">Descrição do Problema</h3>
+            <p style="background: #f8f9fa; padding: 15px; border-radius: 4px; line-height: 1.6; color: #555;">${os.descricao}</p>
+
+            ${os.descricaoFinal ? `
+                <h3 style="background: #f8f9fa; padding: 12px; border-left: 5px solid #28a745; margin: 20px 0 15px 0; color: #1976d2;">Solução Aplicada</h3>
+                <p style="background: #f8f9fa; padding: 15px; border-radius: 4px; line-height: 1.6; color: #555;">${os.descricaoFinal}</p>
+            ` : ''}
+
+            <div style="margin-top: 40px; padding-top: 20px; border-top: 2px solid #ddd; text-align: center; font-size: 11px; color: #999;">
+                <p style="margin: 0;">Relatório gerado em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}</p>
+                <p style="margin: 5px 0 0 0;">EcoMaintain © 2026 - Sistema de Gestão de Manutenção</p>
+            </div>
+        `;
+
+        container.innerHTML = htmlRelatorio;
+        document.body.appendChild(container);
+
+        const opt = {
+            margin: 10,
+            filename: `relatorio_os_${os.id}_${new Date().toISOString().split('T')[0]}.pdf`,
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: { scale: 2 },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        };
+
+        html2pdf().from(container).set(opt).save();
+        document.body.removeChild(container);
+        NOTIFICACOES.sucesso('Relatório detalhado gerado e baixado com sucesso!');
+    }
+};
