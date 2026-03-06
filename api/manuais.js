@@ -4,6 +4,10 @@
 
 const { sql, initDB, corsHeaders } = require('./_db');
 
+// Nota: A Vercel tem limite de 4.5MB para payloads em funções serverless
+// Para arquivos maiores, considere usar S3 ou similar para armazenar PDFs
+// e guardar apenas a URL no banco de dados Neon
+
 module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') {
     return res.status(200)
@@ -48,15 +52,22 @@ module.exports = async (req, res) => {
     // POST - Adicionar novo manual
     if (req.method === 'POST') {
       const { id_maquina, nome_maquina, nome_arquivo, arquivo_pdf, tamanho_mb } = req.body;
+      
+      console.log('Recebendo novo manual:', { id_maquina, nome_arquivo, tamanho_mb, pdf_length: arquivo_pdf?.length });
 
       if (!id_maquina || !nome_arquivo || !arquivo_pdf) {
         return res.status(400).json({ erro: 'ID da máquina, nome do arquivo e PDF são obrigatórios.' });
       }
 
-      // Verificar tamanho do PDF (máximo 10MB em Base64)
-      if (arquivo_pdf.length > 10485760) {
-        return res.status(413).json({ erro: 'Arquivo PDF muito grande. Máximo 10MB.' });
+      // Verificar se o payload nao eh muito grande (limite da Vercel: ~4.5MB)
+      if (arquivo_pdf.length > 4500000) {
+        return res.status(413).json({ 
+          erro: 'Arquivo PDF muito grande para upload direto. Maximo: 3MB em Base64.', 
+          dica: 'Considere comprimir o PDF ou usar um servico de armazenamento em nuvem (S3, Azure Blob, etc)'
+        });
       }
+
+
 
       // Verificar se já existe um manual com o mesmo nome para esta máquina
       const existente = await sql`
@@ -88,10 +99,7 @@ module.exports = async (req, res) => {
         return res.status(400).json({ erro: 'ID do manual e arquivo PDF são obrigatórios.' });
       }
 
-      // Verificar tamanho do PDF (máximo 10MB em Base64)
-      if (arquivo_pdf.length > 10485760) {
-        return res.status(413).json({ erro: 'Arquivo PDF muito grande. Máximo 10MB.' });
-      }
+
 
       await sql`
         UPDATE manuais
