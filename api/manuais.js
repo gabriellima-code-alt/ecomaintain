@@ -60,7 +60,7 @@ module.exports = async (req, res) => {
       }
 
       // Verificar se o payload nao eh muito grande (limite da Vercel: ~4.5MB)
-      if (arquivo_pdf.length > 4500000) {
+      if (typeof arquivo_pdf === 'string' && arquivo_pdf.length > 4500000) {
         return res.status(413).json({ 
           erro: 'Arquivo PDF muito grande para upload direto. Maximo: 3MB em Base64.', 
           dica: 'Considere comprimir o PDF ou usar um servico de armazenamento em nuvem (S3, Azure Blob, etc)'

@@ -75,14 +75,14 @@ module.exports = async (req, res) => {
     if (req.method === 'PUT') {
       const { id, status, laudo_dados, laudo_pdf } = req.body;
       
-      console.log('Atualizando agendamento:', { id, status, pdf_length: laudo_pdf?.length });
+      console.log('Atualizando agendamento:', { id, status, pdf_length: laudo_pdf ? laudo_pdf.length : 0 });
 
       if (!id || !status) {
         return res.status(400).json({ erro: 'ID e status são obrigatórios.' });
       }
 
       // Verificar se o payload nao eh muito grande (limite da Vercel: ~4.5MB)
-      if (laudo_pdf && laudo_pdf.length > 4500000) {
+      if (laudo_pdf && typeof laudo_pdf === 'string' && laudo_pdf.length > 4500000) {
         return res.status(413).json({ 
           erro: 'Arquivo PDF do laudo muito grande para upload direto. Maximo: 3MB em Base64.', 
           dica: 'Considere comprimir o PDF ou usar um servico de armazenamento em nuvem (S3, Azure Blob, etc)'

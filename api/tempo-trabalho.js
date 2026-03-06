@@ -27,15 +27,21 @@ module.exports = async (req, res) => {
         return res.status(400).json({ erro: 'ID do manutentor é obrigatório.' });
       }
 
-      let query = `SELECT * FROM registros_tempo_trabalho WHERE id_manutentor = ${idManutentor}`;
-      
+      let registros;
       if (dataInicio && dataFim) {
-        query += ` AND data_registro BETWEEN '${dataInicio}' AND '${dataFim}'`;
+        registros = await sql`
+          SELECT * FROM registros_tempo_trabalho 
+          WHERE id_manutentor = ${idManutentor} 
+          AND data_registro BETWEEN ${dataInicio} AND ${dataFim}
+          ORDER BY data_registro DESC, hora_inicio DESC
+        `;
+      } else {
+        registros = await sql`
+          SELECT * FROM registros_tempo_trabalho 
+          WHERE id_manutentor = ${idManutentor}
+          ORDER BY data_registro DESC, hora_inicio DESC
+        `;
       }
-
-      query += ` ORDER BY data_registro DESC, hora_inicio DESC`;
-
-      const registros = await sql(query);
       return res.status(200).json(registros);
     }
 
@@ -63,22 +69,31 @@ module.exports = async (req, res) => {
         return res.status(400).json({ erro: 'ID do manutentor é obrigatório.' });
       }
 
-      let query = `
-        SELECT 
-          data_registro,
-          SUM(CASE WHEN tipo_registro = 'trabalho' THEN duracao_minutos ELSE 0 END) as minutos_trabalhados,
-          SUM(CASE WHEN tipo_registro = 'pausa' THEN duracao_minutos ELSE 0 END) as minutos_pausa
-        FROM registros_tempo_trabalho 
-        WHERE id_manutentor = ${idManutentor}
-      `;
-
+      let resumo;
       if (dataInicio && dataFim) {
-        query += ` AND data_registro BETWEEN '${dataInicio}' AND '${dataFim}'`;
+        resumo = await sql`
+          SELECT 
+            data_registro,
+            SUM(CASE WHEN tipo_registro = 'trabalho' THEN duracao_minutos ELSE 0 END) as minutos_trabalhados,
+            SUM(CASE WHEN tipo_registro = 'pausa' THEN duracao_minutos ELSE 0 END) as minutos_pausa
+          FROM registros_tempo_trabalho 
+          WHERE id_manutentor = ${idManutentor}
+          AND data_registro BETWEEN ${dataInicio} AND ${dataFim}
+          GROUP BY data_registro 
+          ORDER BY data_registro DESC
+        `;
+      } else {
+        resumo = await sql`
+          SELECT 
+            data_registro,
+            SUM(CASE WHEN tipo_registro = 'trabalho' THEN duracao_minutos ELSE 0 END) as minutos_trabalhados,
+            SUM(CASE WHEN tipo_registro = 'pausa' THEN duracao_minutos ELSE 0 END) as minutos_pausa
+          FROM registros_tempo_trabalho 
+          WHERE id_manutentor = ${idManutentor}
+          GROUP BY data_registro 
+          ORDER BY data_registro DESC
+        `;
       }
-
-      query += ` GROUP BY data_registro ORDER BY data_registro DESC`;
-
-      const resumo = await sql(query);
       return res.status(200).json(resumo);
     }
 
@@ -90,15 +105,21 @@ module.exports = async (req, res) => {
         return res.status(400).json({ erro: 'ID do manutentor é obrigatório.' });
       }
 
-      let query = `SELECT * FROM sessoes_trabalho WHERE id_manutentor = ${idManutentor}`;
-
+      let sessoes;
       if (dataInicio && dataFim) {
-        query += ` AND data_sessao BETWEEN '${dataInicio}' AND '${dataFim}'`;
+        sessoes = await sql`
+          SELECT * FROM sessoes_trabalho 
+          WHERE id_manutentor = ${idManutentor}
+          AND data_sessao BETWEEN ${dataInicio} AND ${dataFim}
+          ORDER BY data_sessao DESC
+        `;
+      } else {
+        sessoes = await sql`
+          SELECT * FROM sessoes_trabalho 
+          WHERE id_manutentor = ${idManutentor}
+          ORDER BY data_sessao DESC
+        `;
       }
-
-      query += ` ORDER BY data_sessao DESC`;
-
-      const sessoes = await sql(query);
       return res.status(200).json(sessoes);
     }
 
